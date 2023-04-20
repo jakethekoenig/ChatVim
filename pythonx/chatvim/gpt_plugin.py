@@ -19,29 +19,35 @@ class GPTPlugin:
 
     def _get_gpt_response(self, text, history):
         result = openai.ChatCompletion.create(
-            engine="davinci-codex",
+            model="gpt-3.5-turbo",
             messages=history + [{"role": "system", "content": text}],
-            max_tokens=50,
-            n=1,
-            stop=None,
-            temperature=0.5,
         )
 
-        response = result.choices[0].text.strip()
+        response = result['choices'][0]['message']['content']
         return response
 
     def _get_chat_history(self):
-        lines = self.nvim.current.buffer[:]
+        cursor_line, _ = self.nvim.current.window.cursor
+        lines = self.nvim.current.buffer[:cursor_line]
         history = []
 
         for line in lines:
             if line.startswith("GPT:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
             elif line.startswith(">"):
-                history.append({"role": "user", "content": line[1:].strip()})
+                if line.startswith(">>"):
+                    history = []
+                    history.append({"role": "user", "content": line[2:].strip()})
+                else:
+                    history.append({"role": "user", "content": line[1:].strip()})
+            else:
+                if len(history) > 0:
+                    history[-1]["content"] += "\n" + line.strip()
         return history
 
     def _insert_response(self, response):
+        self.nvim.command('setlocal paste')
         self.nvim.command("normal! oGPT: {}".format(response))
         self.nvim.command("normal! o>")
+        self.nvim.command('setlocal nopaste')
 
