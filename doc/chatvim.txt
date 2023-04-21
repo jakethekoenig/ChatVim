@@ -1,0 +1,55 @@
+*chatvim.txt*     For NeoVim version 0.8.3. Last Change: 2023 Apr 21
+
+              / ___| |__   __ _| |\ \   / (_)_ __ ___              ~
+             | |   | '_ \ / _` | __\ \ / /| | '_ ` _ \             ~
+             | |___| | | | (_| | |_ \ V / | | | | | | |            ~
+              \____|_| |_|\__,_|\__| \_/  |_|_| |_| |_|            ~
+                                          
+====================================================================
+CONTENTS                                        *ChatVimContents*
+
+    1. Usage ................ |ChatVimUsage|
+    2. Mappings ............. |ChatVimMappings|
+    3. License .............. |ChatVimLicense|
+    4. Contributing ......... |ChatVimContributing|
+    5. Changelog ............ |ChatVimChangelog|
+
+====================================================================
+Section 1: Usage                                   *ChatVimUsage*
+
+This plugin allows you to talk with ChatGPT in neovim. Start lines
+with ">" and then type "??" or ".." and then the plugin will query
+chatgpt with the chat in the current buffer using "GPT:" and ">" as
+cues for who said what. The plugin will insert GPT's response into
+the next line prepended with "GPT: ". If you want to start a chat in
+the middle of the file you can start a new chat with ">>" and the
+plugin only reads up until the line where it was called.
+
+====================================================================
+Section 2: Mappings                                   *ChatVimUsage*
+
+							*<leader>g*
+<leader>g       Calls Chat GPT and inserts response into next line
+							*i_??*
+??              Calls Chat GPT and inserts response into next line.
+							*i_..*
+..              Calls Chat GPT and inserts response into next line.
+                appends . to your line.
+
+====================================================================
+Section 3: License                                  *ChatVimLicense*
+
+This plugin is distributed under the MIT license.
+
+====================================================================
+Section 4: Contributing                        *ChatVimContributing*
+
+Feel free to open a pull request to the Github repository if you
+want to add any features or fix any bugs.
+
+====================================================================
+Section 5: Changelog                              *ChatVimChangelog*
+
+0.0.1: This software is on it's first version. Breaking changes may
+       be made to function names and mappings. There are likely bugs
+ vim:tw=68:ts=8:ft=help:norl:
