@@ -14,8 +14,9 @@ class GPTPlugin:
     def gpt_response(self, args):
         text = args[0]
         history = self._get_chat_history()
-        response = self._get_gpt_response(text, history)
-        self._insert_response(response)
+        if len(history) > 0:
+            response = self._get_gpt_response(text, history)
+            self._insert_response(response)
 
     def _get_gpt_response(self, text, history):
         result = openai.ChatCompletion.create(
