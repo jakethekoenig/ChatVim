@@ -1,6 +1,8 @@
 import os
 import openai
 import pynvim
+import concurrent.futures
+from pynvim import NvimError
 
 # Set up your OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -14,9 +16,25 @@ class GPTPlugin:
     def gpt_response(self, args):
         text = args[0]
         history = self._get_chat_history()
+
+        def _insert_response(response):
+            self.nvim.command('setlocal paste')
+            self.nvim.command("normal! oGPT: {}".format(response))
+            self.nvim.command("normal! o>")
+            self.nvim.command('setlocal nopaste')
+
+        def _query_gpt_and_insert(text, history):
+            try:
+                response = self._get_gpt_response(text, history)
+                self.nvim.async_call(_insert_response, response)
+            except NvimError as e:
+                self.nvim.err_write(str(e) + '\n')
+
         if len(history) > 0:
-            response = self._get_gpt_response(text, history)
-            self._insert_response(response)
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                executor.submit(_query_gpt_and_insert, text, history)
+            # response = self._get_gpt_response(text, history)
+            # self._insert_response(response)
 
     def _get_gpt_response(self, text, history):
         result = openai.ChatCompletion.create(
@@ -45,10 +63,4 @@ class GPTPlugin:
                 if len(history) > 0:
                     history[-1]["content"] += "\n" + line.strip()
         return history
-
-    def _insert_response(self, response):
-        self.nvim.command('setlocal paste')
-        self.nvim.command("normal! oGPT: {}".format(response))
-        self.nvim.command("normal! o>")
-        self.nvim.command('setlocal nopaste')
 
