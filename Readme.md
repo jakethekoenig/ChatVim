@@ -25,3 +25,4 @@ export OPENAI_API_KEY=<YOUR API KEY>
 
 The plugin infers a chat structure from lines starting with `GPT:` `>` and `>>`. It gives this chat to GPT and inserts the response upon `<leader>g` in normal mode or `??` in insert mode. 
 
+You can control which model you're talking to by writing `3>` or `4>` or by setting the global variable `gpt_model` to the full name of the model you want to talk to. Writing `3>` trumps the global variable. Note you need API access from OpenAi to talk to GPT 4.

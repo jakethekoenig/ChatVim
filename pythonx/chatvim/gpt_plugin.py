@@ -13,14 +13,22 @@ class GPTPlugin:
     @pynvim.function("GPTResponse")
     def gpt_response(self, args):
         text = args[0]
-        history = self._get_chat_history()
+        history, last_talked = self._get_chat_history()
         if len(history) > 0:
-            response = self._get_gpt_response(text, history)
+            response = self._get_gpt_response(text, history, last_talked)
             self._insert_response(response)
 
-    def _get_gpt_response(self, text, history):
+    def _get_gpt_response(self, text, history, last_talked):
+        model = self.nvim.vars.get("gpt_model", "gpt-3.5-turbo")
+
+        # last_talked overrides global variable
+        if last_talked == "3":
+            model = "gpt-3.5-turbo"
+        elif last_talked == "4":
+            model = "gpt-4"
+
         result = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model=model,
             messages=history + [{"role": "system", "content": text}],
         )
 
@@ -31,24 +39,31 @@ class GPTPlugin:
         cursor_line, _ = self.nvim.current.window.cursor
         lines = self.nvim.current.buffer[:cursor_line]
         history = []
+        last_talked = None
 
         for line in lines:
             if line.startswith("GPT:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
-            elif line.startswith(">"):
-                if line.startswith(">>"):
+            elif line.startswith(">") or line.startswith("3>") or line.startswith("4>"):
+                if line.startswith(">>") or line.startswith("3>>") or line.startswith("4>>"):
                     history = []
                     history.append({"role": "user", "content": line[2:].strip()})
                 else:
                     history.append({"role": "user", "content": line[1:].strip()})
+                if line.startswith("3"):
+                    last_talked = "3"
+                elif line.startswith("4"):
+                    last_talked = "4"
+                else:
+                    last_talked = None
             else:
                 if len(history) > 0:
                     history[-1]["content"] += "\n" + line.strip()
-        return history
+        return history, last_talked
 
     def _insert_response(self, response):
-        self.nvim.command('setlocal paste')
+        self.nvim.command("setlocal paste")
         self.nvim.command("normal! oGPT: {}".format(response))
         self.nvim.command("normal! o>")
-        self.nvim.command('setlocal nopaste')
+        self.nvim.command("setlocal nopaste")
 
