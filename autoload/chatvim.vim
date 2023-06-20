@@ -9,7 +9,7 @@ if pythonx_path not in sys.path:
   sys.path.append(pythonx_path)
 
 from chatvim.gpt_plugin import GPTPlugin
-GPTPlugin(vim).gpt_response(vim.current.line)
+GPTPlugin(vim).gpt_response()
 EOF
 endfunction
 

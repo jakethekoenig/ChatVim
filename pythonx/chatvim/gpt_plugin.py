@@ -11,14 +11,13 @@ class GPTPlugin:
         self.nvim = nvim
 
     @pynvim.function("GPTResponse")
-    def gpt_response(self, args):
-        text = args[0]
+    def gpt_response(self):
         history, last_talked = self._get_chat_history()
         if len(history) > 0:
-            response = self._get_gpt_response(text, history, last_talked)
+            response = self._get_gpt_response(history, last_talked)
             self._insert_response(response)
 
-    def _get_gpt_response(self, text, history, last_talked):
+    def _get_gpt_response(self, history, last_talked):
         model = self.nvim.vars.get("gpt_model", "gpt-3.5-turbo")
 
         # last_talked overrides global variable
@@ -27,9 +26,11 @@ class GPTPlugin:
         elif last_talked == "4":
             model = "gpt-4"
 
+        system_prompt = []
+
         result = openai.ChatCompletion.create(
             model=model,
-            messages=history + [{"role": "system", "content": text}],
+            messages=system_prompt + history ,
         )
 
         response = result['choices'][0]['message']['content']
