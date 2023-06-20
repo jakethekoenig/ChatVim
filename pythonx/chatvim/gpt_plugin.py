@@ -43,6 +43,8 @@ class GPTPlugin:
         last_talked = None
 
         for line in lines:
+            if line.startswith("//") or line.startswith("#"):
+                continue
             if line.startswith("GPT:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
             elif line.startswith(">") or line.startswith("3>") or line.startswith("4>"):
