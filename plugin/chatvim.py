@@ -10,7 +10,7 @@ class GPTPlugin:
         self.nvim = nvim
 
     @pynvim.function("GPTResponse", sync=False)
-    def gpt_response(self):
+    def gpt_response(self, args):
         buffer = self.nvim.current.buffer
         row, col = self.nvim.current.window.cursor
         history, last_talked = self._get_chat_history()
