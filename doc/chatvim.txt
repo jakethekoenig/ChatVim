@@ -52,4 +52,5 @@ Section 5: Changelog                              *ChatVimChangelog*
 
 0.0.1: This software is on it's first version. Breaking changes may
        be made to function names and mappings. There are likely bugs
+1.0.0: Calls are now asynchronous. Better plugin conventions.
  vim:tw=68:ts=8:ft=help:norl:
