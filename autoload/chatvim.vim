@@ -1,3 +1,13 @@
+
+function! chatvim#test(response)
+    echom a:response
+    setlocal paste
+    execute "normal! oGPT: " . a:response
+    execute "normal! o>"
+    redraw
+    setlocal nopaste
+endfunction
+
 function! chatvim#GPTResponse()
   python3 << EOF
 import sys
@@ -12,4 +22,3 @@ from chatvim.gpt_plugin import GPTPlugin
 GPTPlugin(vim).gpt_response()
 EOF
 endfunction
-
