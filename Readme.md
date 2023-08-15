@@ -15,6 +15,13 @@ export OPENAI_API_KEY=<YOUR API KEY> # If not already set
 
 # Usage
 
-The plugin infers a chat structure from lines starting with `GPT:` `>` and `>>`. It gives this chat to GPT and inserts the response upon `<leader>g` in normal mode or `??` in insert mode. 
+The plugin infers a chat structure from the beginning of the file to the current line. The plugin infers who is talking from the following sequences at the start of the line. If no sequence is present than the current speaker is unchanged
+| Sequence | Effect |
+| `>>` | Starts a new chat. Previous lines ignored. Speaker is user. |
+| `3>` | Changed the model spoken to to GPT-3. Speaker is user. |
+| `4>` | Changed the model spoken to to GPT-4. Speaker is user.|
+| `3>>` | Changed the model spoken to to GPT-3 and starts a new chat. Speaker is user. |
+| `4>>` | Changed the model spoken to to GPT-4 and starts a new chat. Speaker is user.|
+| `GPT:` | Speaker is GPT. |
 
-You can control which model you're talking to by writing `3>` or `4>` or by setting the global variable `gpt_model` to the full name of the model you want to talk to. Writing `3>` trumps the global variable.
+You can call the model by entering `..` or `??` in insert mode or `<leader>g` in normal mode. GPT's output is streamed in the next line. You can interrupt the model at any time. Just start typing.
