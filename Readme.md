@@ -24,6 +24,9 @@ The plugin infers a chat structure from the beginning of the file to the current
 | `4>` | Changed the model spoken to to GPT-4. Speaker is user.|
 | `3>>` | Changed the model spoken to to GPT-3 and starts a new chat. Speaker is user. |
 | `4>>` | Changed the model spoken to to GPT-4 and starts a new chat. Speaker is user.|
+| `>` | Speaker is user. Model is unchanged. |
 | `GPT:` | Speaker is GPT. |
 
 You can call the model by entering `..` or `??` in insert mode or `<leader>g` in normal mode. GPT's output is streamed in the next line. You can interrupt the model at any time. Just start typing.
+
+The model defaults to `gpt-3.5-turbo` but this can be configured by setting `gpt_model` in your vimrc.
