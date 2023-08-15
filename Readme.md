@@ -16,7 +16,9 @@ export OPENAI_API_KEY=<YOUR API KEY> # If not already set
 # Usage
 
 The plugin infers a chat structure from the beginning of the file to the current line. The plugin infers who is talking from the following sequences at the start of the line. If no sequence is present than the current speaker is unchanged
+
 | Sequence | Effect |
+| --------- | --------- |
 | `>>` | Starts a new chat. Previous lines ignored. Speaker is user. |
 | `3>` | Changed the model spoken to to GPT-3. Speaker is user. |
 | `4>` | Changed the model spoken to to GPT-4. Speaker is user.|
