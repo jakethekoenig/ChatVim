@@ -8,7 +8,7 @@ This is a plugin to talk to Chat GPT in neovim. To talk to ChatGPT in normal mod
 
 ```bash
 git clone https://github.com/jakethekoenig/ChatVim.git ~/.vim/pack/misc/start/
-cd ~/.vim/pack/misc/start/
+cd ~/.vim/pack/misc/start/ChatVim
 pip install -r requirements.txt # Only openai and pynvim
 export OPENAI_API_KEY=<YOUR API KEY> # If not already set
 ```
