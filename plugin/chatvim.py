@@ -2,8 +2,6 @@ import os
 import openai
 import pynvim
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
 def line_diff(subseq, line):
     ans = ""
     at = 0
