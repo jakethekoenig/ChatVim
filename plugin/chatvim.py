@@ -12,6 +12,13 @@ def line_diff(subseq, line):
             ans += c
     return ans
 
+def get_system_prompt(prompt="default"):
+    prompt_dir = os.path.expanduser("~/.config/chatvim/prompts")
+    prompt_file = os.path.join(prompt_dir, prompt)
+    if os.path.exists(prompt_file):
+        with open(prompt_file, "r") as f:
+            return f.read()
+    return None
 @pynvim.plugin
 class GPTPlugin:
     def __init__(self, nvim):
@@ -20,6 +27,9 @@ class GPTPlugin:
     @pynvim.function("GPTResponse")
     def gpt_response(self, args):
         history, last_talked = self._get_chat_history()
+        prompt = get_system_prompt()
+        if prompt:
+            history = [{"role": "system", "content": prompt}] + history
 
         model = self.nvim.vars.get("gpt_model", "gpt-3.5-turbo")
         # last_talked overrides global variable
