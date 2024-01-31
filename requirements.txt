@@ -1,2 +1,2 @@
 pynvim
-openai
+openai==1.10.0

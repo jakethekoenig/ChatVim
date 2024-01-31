@@ -1,5 +1,5 @@
 import os
-import openai
+from openai import OpenAI
 import pynvim
 
 def line_diff(subseq, line):
@@ -23,6 +23,8 @@ def get_system_prompt(prompt="default"):
 class GPTPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
+        self.client = OpenAI()
+
 
     @pynvim.function("GPTResponse")
     def gpt_response(self, args):
@@ -42,7 +44,7 @@ class GPTPlugin:
             self.make_gpt_request(history, model)
 
     def make_gpt_request(self, history, model):
-        response = openai.ChatCompletion.create(
+        response = self.client.chat.completions.create(
             model=model,
             messages=history,
             stream=True
@@ -68,11 +70,10 @@ class GPTPlugin:
 
                     interrupted = True
                     break
-                delta = chunk['choices'][0]['delta']
-                if 'content' in delta:
-                    chunk = delta['content']
-                    self.nvim.feedkeys(chunk)
-                    total_response += chunk
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    self.nvim.feedkeys(delta)
+                    total_response += delta
         except KeyboardInterrupt:
             self.nvim.command('echom "Keyboard Interrupt received"')
         finally:
