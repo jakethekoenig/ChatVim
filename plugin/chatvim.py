@@ -77,7 +77,6 @@ class GPTPlugin:
         except KeyboardInterrupt:
             self.nvim.command('echom "Keyboard Interrupt received"')
         finally:
-            response.close()
             if not interrupted:
                 self.nvim.feedkeys("\x03o> \x03")
             self.nvim.command('set {}'.format(initial_paste_value))
