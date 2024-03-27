@@ -21,9 +21,9 @@ This plugin allows you to talk with ChatGPT in neovim. Start lines
 with ">" and then type "??" or ".." and then the plugin will query
 chatgpt with the chat in the current buffer using "GPT:" and ">" as
 cues for who said what. The plugin will insert GPT's response into
-the next line prepended with "GPT: ". If you want to start a chat in
-the middle of the file you can start a new chat with ">>" and the
-plugin only reads up until the line where it was called.
+the next line prepended with "GPT: ". Change the model you're
+talking to by setting the g:chatvim_model variable to the model you
+use by setting `g:gpt_model`. The default model is "gpt-3.5-turbo".
 
 ====================================================================
 Section 2: Mappings                                   *ChatVimUsage*
@@ -53,4 +53,6 @@ Section 5: Changelog                              *ChatVimChangelog*
 0.0.1: This software is on it's first version. Breaking changes may
        be made to function names and mappings. There are likely bugs
 1.0.0: Calls are now asynchronous. Better plugin conventions.
+1.1.0: Calls are now made with litellm to make it easy to change
+       models
  vim:tw=68:ts=8:ft=help:norl:
