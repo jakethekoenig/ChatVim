@@ -95,7 +95,7 @@ class GPTPlugin:
             if line.startswith("GPT:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
             elif line.startswith(">"):
-                line = line.lstrip('>')
+                line = line.lstrip('>').strip()
                 history.append({"role": "user", "content": line})
             else:
                 if len(history) > 0:
