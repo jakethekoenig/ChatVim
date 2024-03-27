@@ -9,7 +9,7 @@ This is a plugin to talk to Chat GPT in neovim. To talk to ChatGPT in normal mod
 ```bash
 git clone https://github.com/jakethekoenig/ChatVim.git ~/.vim/pack/misc/start/
 cd ~/.vim/pack/misc/start/ChatVim
-pip install -r requirements.txt # Only openai and pynvim
+pip install -r requirements.txt # Only litellm and pynvim
 export OPENAI_API_KEY=<YOUR API KEY> # If not already set
 ```
 
@@ -20,10 +20,8 @@ The plugin infers a chat structure from the beginning of the file to the current
 | Sequence | Effect |
 | --------- | --------- |
 | `>>` | Starts a new chat. Previous lines ignored. Speaker is user. |
-| `3>` | Changed the model spoken to to GPT-3. Speaker is user. |
-| `4>` | Changed the model spoken to to GPT-4. Speaker is user.|
-| `3>>` | Changed the model spoken to to GPT-3 and starts a new chat. Speaker is user. |
-| `4>>` | Changed the model spoken to to GPT-4 and starts a new chat. Speaker is user.|
+| `gpt-3.5-turbo>>` | Changed the model spoken to to GPT-3.5-turbo and starts a new chat. Speaker is user. |
+| `gpt-4>>` | Changed the model spoken to to GPT-4 and starts a new chat. Speaker is user.|
 | `>` | Speaker is user. Model is unchanged. |
 | `GPT:` | Speaker is GPT. |
 

@@ -1,5 +1,6 @@
 import os
-from openai import OpenAI
+import litellm
+import pynvim
 import pynvim
 
 def line_diff(subseq, line):
@@ -44,10 +45,11 @@ class GPTPlugin:
             self.make_gpt_request(history, model)
 
     def make_gpt_request(self, history, model):
-        response = self.client.chat.completions.create(
+        response = litellm.completion(
             model=model,
             messages=history,
-            stream=True
+            max_tokens=100  # Assuming a default value; adjust as needed
+        )
         )
 
         initial_paste_value = self.nvim.command_output('set paste?')
@@ -94,16 +96,18 @@ class GPTPlugin:
                 continue
             if line.startswith("GPT:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
-            elif line.startswith(">") or line.startswith("3>") or line.startswith("4>"):
-                if line.startswith(">>") or line.startswith("3>>") or line.startswith("4>>"):
+            elif line.startswith(">"):
+                model_specifier = line.split(">>")[0] if ">>" in line else ""
+                if ">>" in line:
                     history = []
-                    history.append({"role": "user", "content": line[2:].strip()})
+                    history.append({"role": "user", "content": line[len(model_specifier) + 2:].strip()})
+                    model = model_specifier
                 else:
                     history.append({"role": "user", "content": line[1:].strip()})
-                if line.startswith("3"):
-                    last_talked = "3"
-                elif line.startswith("4"):
-                    last_talked = "4"
+            else:
+                if len(history) > 0:
+                    history[-1]["content"] += "\n" + line.strip()
+        return history, model
             else:
                 if len(history) > 0:
                     history[-1]["content"] += "\n" + line.strip()

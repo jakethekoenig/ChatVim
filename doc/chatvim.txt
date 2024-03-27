@@ -22,8 +22,8 @@ with ">" and then type "??" or ".." and then the plugin will query
 chatgpt with the chat in the current buffer using "GPT:" and ">" as
 cues for who said what. The plugin will insert GPT's response into
 the next line prepended with "GPT: ". If you want to start a chat in
-the middle of the file you can start a new chat with ">>" and the
-plugin only reads up until the line where it was called.
+| `gpt-3.5-turbo>>` | Changed the model spoken to to GPT-3.5-turbo and starts a new chat. Speaker is user. |
+| `gpt-4>>` | Changed the model spoken to to GPT-4 and starts a new chat. Speaker is user.|
 
 ====================================================================
 Section 2: Mappings                                   *ChatVimUsage*
