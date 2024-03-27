@@ -1,7 +1,6 @@
 import os
 import litellm
 import pynvim
-import pynvim
 
 def line_diff(subseq, line):
     ans = ""
@@ -20,26 +19,21 @@ def get_system_prompt(prompt="default"):
         with open(prompt_file, "r") as f:
             return f.read()
     return None
+
 @pynvim.plugin
 class GPTPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
-        self.client = OpenAI()
 
 
     @pynvim.function("GPTResponse")
     def gpt_response(self, args):
-        history, last_talked = self._get_chat_history()
+        history = self._get_chat_history()
         prompt = get_system_prompt()
         if prompt:
             history = [{"role": "system", "content": prompt}] + history
 
         model = self.nvim.vars.get("gpt_model", "gpt-3.5-turbo")
-        # last_talked overrides global variable
-        if last_talked == "3":
-            model = "gpt-3.5-turbo"
-        elif last_talked == "4":
-            model = "gpt-4"
 
         if len(history) > 0:
             self.make_gpt_request(history, model)
@@ -48,8 +42,8 @@ class GPTPlugin:
         response = litellm.completion(
             model=model,
             messages=history,
-            max_tokens=100  # Assuming a default value; adjust as needed
-        )
+            max_tokens=4000,
+            stream=True
         )
 
         initial_paste_value = self.nvim.command_output('set paste?')
@@ -88,8 +82,12 @@ class GPTPlugin:
     def _get_chat_history(self):
         cursor_line, _ = self.nvim.current.window.cursor
         lines = self.nvim.current.buffer[:cursor_line]
+        for i, line in enumerate(lines[::-1]):
+            if line.startswith(">>"):
+                lines = lines[len(lines) - i - 1:]
+                break
+
         history = []
-        last_talked = None
 
         for line in lines:
             if line.startswith("//") or line.startswith("#"):
@@ -97,18 +95,9 @@ class GPTPlugin:
             if line.startswith("GPT:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
             elif line.startswith(">"):
-                model_specifier = line.split(">>")[0] if ">>" in line else ""
-                if ">>" in line:
-                    history = []
-                    history.append({"role": "user", "content": line[len(model_specifier) + 2:].strip()})
-                    model = model_specifier
-                else:
-                    history.append({"role": "user", "content": line[1:].strip()})
+                line = line.lstrip('>')
+                history.append({"role": "user", "content": line})
             else:
                 if len(history) > 0:
                     history[-1]["content"] += "\n" + line.strip()
-        return history, model
-            else:
-                if len(history) > 0:
-                    history[-1]["content"] += "\n" + line.strip()
-        return history, last_talked
+        return history
