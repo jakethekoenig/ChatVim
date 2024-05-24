@@ -25,6 +25,31 @@ class GPTPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
 
+    @pynvim.function("ExtractCodeFromMarkdown", sync=True)
+    def extract_code_from_markdown(self, args):
+        register = args[0] if args else '"'
+        lines = self.nvim.current.buffer[:]
+        code_block = []
+        in_code_block = False
+        for line in lines:
+            if line.strip() == '```':
+                in_code_block = not in_code_block
+                continue
+            if in_code_block:
+                code_block.append(line)
+        if code_block:
+            self.nvim.command(f'let @{register} = "{chr(10).join(code_block)}"')
+        else:
+            self.nvim.command('echo "No markdown code block found"')
+
+    @pynvim.function("PasteCodeToNewFile", sync=True)
+    def paste_code_to_new_file(self, args):
+        register = args[0] if args else '"'
+        self.nvim.command('enew')  # Open a new buffer
+        self.nvim.command(f'put @{register}')  # Paste contents of the register
+        self.nvim.command('write llm_code.py')  # Save the file
+        self.nvim.command('echo "Code block saved to llm_code.py"')
+
 
     @pynvim.function("GPTResponse")
     def gpt_response(self, args):
