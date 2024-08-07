@@ -8,3 +8,6 @@ nnoremap <silent> <leader>g :call GPTResponse()<CR>
 " Define the insert mode mappings
 inoremap ?? ?<Esc>:call GPTResponse()<CR>
 inoremap .. .<Esc>:call GPTResponse()<CR>
+
+" Define the visual mode mapping
+vnoremap <silent> <leader>ask :<C-U>call GPTAsk()<CR>
