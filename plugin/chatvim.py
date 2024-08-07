@@ -25,12 +25,32 @@ class GPTPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
 
-
     @pynvim.function("GPTResponse")
     def gpt_response(self, args):
         history = self._get_chat_history()
         prompt = get_system_prompt()
         if prompt:
+
+    @pynvim.function("GPTAsk")
+    def gpt_ask(self, args):
+        # Get the selected text in visual mode
+        selected_text = self.nvim.eval('getline("'<", ">")')
+        if not selected_text:
+            self.nvim.command('echom "No text selected"')
+            return
+
+        # Remove indentation and wrap in markdown quotes
+        stripped_text = [line.strip() for line in selected_text]
+        markdown_text = "\n".join([f"> {line}" for line in stripped_text])
+
+        # Prepare the history with the markdown text
+        history = [{"role": "user", "content": markdown_text}]
+        prompt = get_system_prompt()
+        if prompt:
+            history = [{"role": "system", "content": prompt}] + history
+
+        model = self.nvim.vars.get("gpt_model", "gpt-3.5-turbo")
+        self.make_gpt_request(history, model)
             history = [{"role": "system", "content": prompt}] + history
 
         model = self.nvim.vars.get("gpt_model", "gpt-3.5-turbo")
