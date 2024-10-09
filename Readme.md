@@ -10,14 +10,16 @@ This is a plugin to talk to Chat GPT in neovim. To talk to ChatGPT in normal mod
 git clone https://github.com/jakethekoenig/ChatVim.git ~/.vim/pack/misc/start/
 cd ~/.vim/pack/misc/start/ChatVim
 pip install -r requirements.txt # Only litellm and pynvim
-export OPENAI_API_KEY=<YOUR API KEY> # If not already set
+# Defaults to sonnet-3.5. Only need to set the API key for the model you want to use.
+export ANTHROPIC_API_KEY=<YOUR API KEY>
+export OPENAI_API_KEY=<YOUR API KEY>
 ```
 
 I recommend installing the requirements in a virtual environment. See [here](https://neovim.io/doc/user/provider.html) for how to have a neovim specific virtual environment.
 
 # Usage
 
-The plugin infers a chat structure from the beginning of the file to the current line. The plugin infers who is talking from the following sequences at the start of the line. If no sequence is present than the current speaker is unchanged
+The plugin infers a chat structure from the beginning of the file to the current line. The plugin infers who is talking from the following sequences at the start of the line.
 
 | Sequence | Effect |
 | --------- | --------- |
@@ -27,4 +29,4 @@ The plugin infers a chat structure from the beginning of the file to the current
 
 You can call the model by entering `..` or `??` in insert mode or `<leader>g` in normal mode. GPT's output is streamed in the next line. You can interrupt the model at any time. Just start typing.
 
-The model defaults to `gpt-3.5-turbo` but this can be configured by setting `gpt_model` in your vimrc.
+The model defaults to `claude-3-5-sonnet-20240620` but this can be configured by setting `gpt_model` in your vimrc. The Plugin uses litellm. Se1 [their documentation](https://docs.litellm.ai/docs/providers) for supported models.

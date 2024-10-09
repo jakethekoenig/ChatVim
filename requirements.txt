@@ -1,2 +1,2 @@
 pynvim
-litellm==1.34.6
+litellm==1.40.20

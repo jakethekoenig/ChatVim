@@ -33,7 +33,7 @@ class GPTPlugin:
         if prompt:
             history = [{"role": "system", "content": prompt}] + history
 
-        model = self.nvim.vars.get("gpt_model", "gpt-3.5-turbo")
+        model = self.nvim.vars.get("gpt_model", "claude-3-5-sonnet-20240620")
 
         if len(history) > 0:
             self.make_gpt_request(history, model)
