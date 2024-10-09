@@ -1,6 +1,6 @@
 # Chat Vim
 
-This is a plugin to talk to Chat GPT in neovim. To talk to ChatGPT in normal mode type `<leader>g` or in insert mode type `??` or '..'. The plugin will take lines starting with `GPT:` or following those lines as from GPT and lines starting with `>` as from you. If you want to start a new chat in the same file start a line with `>>`.
+This is a plugin to talk to LLMs in neovim. To talk to an LLM in normal mode type `<leader>g`. The plugin will take lines starting with `LLM:` or following those lines as from LLM and lines starting with `>` as from you. If you want to start a new chat in the same file start a line with `>>`.
 
 ![](chat2.gif)
 
@@ -25,8 +25,8 @@ The plugin infers a chat structure from the beginning of the file to the current
 | --------- | --------- |
 | `>>` | Starts a new chat. Previous lines ignored. Speaker is user. |
 | `>` | Speaker is user. |
-| `GPT:` | Speaker is GPT. |
+| `LLM:` | Speaker is llm_model. |
 
-You can call the model by entering `..` or `??` in insert mode or `<leader>g` in normal mode. GPT's output is streamed in the next line. You can interrupt the model at any time. Just start typing.
+You can get a completion from the model with `<leader>g` or `:call LLMResponse()`. The LLM's output is streamed in the next line. You can interrupt the model at any time. Just start typing.
 
-The model defaults to `claude-3-5-sonnet-20240620` but this can be configured by setting `gpt_model` in your vimrc. The Plugin uses litellm. Se1 [their documentation](https://docs.litellm.ai/docs/providers) for supported models.
+The model defaults to `claude-3-5-sonnet-20240620` but this can be configured by setting `llm_model` in your vimrc. The Plugin uses litellm. See [their documentation](https://docs.litellm.ai/docs/providers) for supported models.

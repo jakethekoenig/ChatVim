@@ -21,24 +21,24 @@ def get_system_prompt(prompt="default"):
     return None
 
 @pynvim.plugin
-class GPTPlugin:
+class LLMPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
 
 
-    @pynvim.function("GPTResponse")
-    def gpt_response(self, args):
+    @pynvim.function("LLMResponse")
+    def llm_response(self, args):
         history = self._get_chat_history()
         prompt = get_system_prompt()
         if prompt:
             history = [{"role": "system", "content": prompt}] + history
 
-        model = self.nvim.vars.get("gpt_model", "claude-3-5-sonnet-20240620")
+        model = self.nvim.vars.get("llm_model", "claude-3-5-sonnet-20240620")
 
         if len(history) > 0:
-            self.make_gpt_request(history, model)
+            self.make_llm_request(history, model)
 
-    def make_gpt_request(self, history, model):
+    def make_llm_request(self, history, model):
         response = litellm.completion(
             model=model,
             messages=history,
@@ -48,7 +48,7 @@ class GPTPlugin:
 
         initial_paste_value = self.nvim.command_output('set paste?')
         self.nvim.command('set paste')
-        self.nvim.feedkeys("oGPT: ")
+        self.nvim.feedkeys("oLLM: ")
 
         total_response = ""
         interrupted = False
@@ -56,8 +56,8 @@ class GPTPlugin:
             for chunk in response:
                 current_line = self.nvim.call('getline', '.')
                 prefix = ""
-                if current_line.startswith("GPT: "):
-                    prefix = "GPT: "
+                if current_line.startswith("LLM: "):
+                    prefix = "LLM: "
                     current_line = current_line[5:]
                 if len(current_line) != 0 and current_line != total_response[-len(current_line):]:
                     last_line_response = total_response.split("\n")[-1]
@@ -92,7 +92,7 @@ class GPTPlugin:
         for line in lines:
             if line.startswith("//") or line.startswith("#"):
                 continue
-            if line.startswith("GPT:"):
+            if line.startswith("LLM:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
             elif line.startswith(">"):
                 line = line.lstrip('>').strip()
