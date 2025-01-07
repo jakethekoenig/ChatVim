@@ -2,6 +2,7 @@ import os
 import litellm
 import pynvim
 
+
 def line_diff(subseq, line):
     ans = ""
     at = 0
@@ -12,6 +13,7 @@ def line_diff(subseq, line):
             ans += c
     return ans
 
+
 def get_system_prompt(prompt="default"):
     prompt_dir = os.path.expanduser("~/.config/chatvim/prompts")
     prompt_file = os.path.join(prompt_dir, prompt)
@@ -20,11 +22,11 @@ def get_system_prompt(prompt="default"):
             return f.read()
     return None
 
+
 @pynvim.plugin
 class LLMPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
-
 
     @pynvim.function("LLMResponse")
     def llm_response(self, args):
@@ -40,29 +42,31 @@ class LLMPlugin:
 
     def make_llm_request(self, history, model):
         response = litellm.completion(
-            model=model,
-            messages=history,
-            max_tokens=4000,
-            stream=True
+            model=model, messages=history, max_tokens=4000, stream=True
         )
 
-        initial_paste_value = self.nvim.command_output('set paste?')
-        self.nvim.command('set paste')
+        initial_paste_value = self.nvim.command_output("set paste?")
+        self.nvim.command("set paste")
         self.nvim.feedkeys("oLLM: ")
 
         total_response = ""
         interrupted = False
         try:
             for chunk in response:
-                current_line = self.nvim.call('getline', '.')
+                current_line = self.nvim.call("getline", ".")
                 prefix = ""
                 if current_line.startswith("LLM: "):
                     prefix = "LLM: "
                     current_line = current_line[5:]
-                if len(current_line) != 0 and current_line != total_response[-len(current_line):]:
+                if (
+                    len(current_line) != 0
+                    and current_line != total_response[-len(current_line) :]
+                ):
                     last_line_response = total_response.split("\n")[-1]
                     diff = line_diff(last_line_response, current_line)
-                    self.nvim.feedkeys("\x03cc{}{}\n> {}\x03".format(prefix, last_line_response, diff))
+                    self.nvim.feedkeys(
+                        "\x03cc{}{}\n> {}\x03".format(prefix, last_line_response, diff)
+                    )
 
                     interrupted = True
                     break
@@ -75,7 +79,7 @@ class LLMPlugin:
         finally:
             if not interrupted:
                 self.nvim.feedkeys("\x03o> \x03")
-            self.nvim.command('set {}'.format(initial_paste_value))
+            self.nvim.command("set {}".format(initial_paste_value))
             if interrupted:
                 self.nvim.feedkeys("a")
 
@@ -84,7 +88,7 @@ class LLMPlugin:
         lines = self.nvim.current.buffer[:cursor_line]
         for i, line in enumerate(lines[::-1]):
             if line.startswith(">>"):
-                lines = lines[len(lines) - i - 1:]
+                lines = lines[len(lines) - i - 1 :]
                 break
 
         history = []
@@ -95,7 +99,7 @@ class LLMPlugin:
             if line.startswith("LLM:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
             elif line.startswith(">"):
-                line = line.lstrip('>').strip()
+                line = line.lstrip(">").strip()
                 history.append({"role": "user", "content": line})
             else:
                 if len(history) > 0:
