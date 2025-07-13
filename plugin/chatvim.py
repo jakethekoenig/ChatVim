@@ -19,7 +19,7 @@ def get_system_prompt(prompt="default"):
 class LLMPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
-        self.completion_active = False
+        self.completion_active = threading.Event()
         self.completion_thread = None
 
 
@@ -36,7 +36,7 @@ class LLMPlugin:
             self.make_llm_request(history, model)
 
     def make_llm_request(self, history, model):
-        if self.completion_active:
+        if self.completion_active.is_set():
             self.nvim.command('echom "LLM completion already in progress"')
             return
         
@@ -52,7 +52,7 @@ class LLMPlugin:
         # Move cursor to the new line
         self.nvim.current.window.cursor = (target_line + 1, len(LLM_PREFIX))
         
-        self.completion_active = True
+        self.completion_active.set()
         
         # Start the completion in a separate thread
         self.completion_thread = threading.Thread(
@@ -75,7 +75,7 @@ class LLMPlugin:
             completed_normally = True
             
             for chunk in response:
-                if not self.completion_active:
+                if not self.completion_active.is_set():
                     completed_normally = False
                     break
                     
@@ -87,7 +87,7 @@ class LLMPlugin:
                     self.nvim.async_call(self._update_buffer, buffer_number, target_line, total_response)
                     
                     # Check if completion was interrupted after scheduling update
-                    if not self.completion_active:
+                    if not self.completion_active.is_set():
                         completed_normally = False
                         break
                     
@@ -96,22 +96,26 @@ class LLMPlugin:
             self.nvim.async_call(self.nvim.command, f'echom "LLM completion error: {error_msg}"')
             completed_normally = False
         finally:
-            self.completion_active = False
+            # Check one more time in case interruption happened right before finally
+            if not self.completion_active.is_set():
+                completed_normally = False
+            self.completion_active.clear()
+            self.completion_thread = None
             # Add a new user prompt line only if completion finished normally
             if completed_normally:
                 self.nvim.async_call(self._finish_completion, buffer_number, target_line, total_response)
 
     def _update_buffer(self, buffer_number, start_line, total_response):
-        if not self.completion_active:
+        if not self.completion_active.is_set():
             return
             
         try:
             # Get the buffer from the main thread
             target_buffer = self.nvim.buffers[buffer_number]
             
-            # Check if user has modified the buffer (interruption detection)
-            if self._check_for_user_interruption(target_buffer, start_line, total_response):
-                self.completion_active = False
+            # Check if user has modified the buffer or entered insert mode (interruption detection)
+            if self._check_for_user_interruption(target_buffer, start_line, total_response, buffer_number):
+                self.completion_active.clear()
                 return
                 
             # Split the total response into lines and prepend "LLM: " to the first line
@@ -131,11 +135,18 @@ class LLMPlugin:
         except Exception as e:
             error_msg = str(e).replace('"', r'\"')
             self.nvim.command(f'echom "Buffer update error: {error_msg}"')
-            self.completion_active = False
+            self.completion_active.clear()
 
-    def _check_for_user_interruption(self, target_buffer, start_line, expected_response):
-        """Check if user has modified the buffer, indicating interruption"""
+    def _check_for_user_interruption(self, target_buffer, start_line, expected_response, buffer_number):
+        """Check if user has modified the buffer or entered insert mode, indicating interruption"""
         try:
+            # Check if user is in insert mode and in the target buffer
+            current_buffer = self.nvim.current.buffer
+            if current_buffer.number == buffer_number:
+                current_mode = self.nvim.call('mode')
+                if current_mode.startswith('i') or current_mode.startswith('R'):
+                    return True
+            
             # Build expected lines from the response
             response_lines = expected_response.split('\n')
             expected_lines = [LLM_PREFIX + response_lines[0]]
@@ -171,6 +182,11 @@ class LLMPlugin:
             # Add a new user prompt line
             target_buffer.append([USER_PREFIX], last_line_num)
             
+            # Move cursor to the new user prompt line for easy typing
+            # Check if this buffer is currently active
+            if self.nvim.current.buffer.number == buffer_number:
+                self.nvim.current.window.cursor = (last_line_num + 2, len(USER_PREFIX))
+            
         except Exception as e:
             error_msg = str(e).replace('"', r'\"')
             self.nvim.command(f'echom "Completion finish error: {error_msg}"')
@@ -188,8 +204,13 @@ class LLMPlugin:
         for line in lines:
             if line.startswith("//") or line.startswith("#"):
                 continue
-            if line.startswith(LLM_PREFIX):
-                history.append({"role": "assistant", "content": line[len(LLM_PREFIX):].strip()})
+            if line.startswith(LLM_PREFIX) or line.startswith("LLM:"):
+                # Support both old format "LLM:" and new format "LLM: " for back-compatibility
+                if line.startswith(LLM_PREFIX):
+                    content = line[len(LLM_PREFIX):].strip()
+                else:
+                    content = line[4:].strip()
+                history.append({"role": "assistant", "content": content})
             elif line.startswith(">"):
                 line = line.lstrip('>').strip()
                 history.append({"role": "user", "content": line})
