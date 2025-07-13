@@ -2,17 +2,10 @@ import os
 import litellm
 import pynvim
 import threading
-import time
 
-def line_diff(subseq, line):
-    ans = ""
-    at = 0
-    for c in line:
-        if len(subseq) > at and c == subseq[at]:
-            at += 1
-        else:
-            ans += c
-    return ans
+# Constants
+LLM_PREFIX = "LLM: "
+USER_PREFIX = "> "
 
 def get_system_prompt(prompt="default"):
     prompt_dir = os.path.expanduser("~/.config/chatvim/prompts")
@@ -44,30 +37,32 @@ class LLMPlugin:
 
     def make_llm_request(self, history, model):
         if self.completion_active:
+            self.nvim.command('echom "LLM completion already in progress"')
             return
         
-        # Store the target buffer and position
+        # Store the target buffer number and position for thread safety
         target_buffer = self.nvim.current.buffer
+        buffer_number = target_buffer.number
         cursor_line, _ = self.nvim.current.window.cursor
         target_line = cursor_line  # 0-indexed
         
         # Add the initial "LLM: " line (append inserts after target_line)
-        target_buffer.append(["LLM: "], target_line)
+        target_buffer.append([LLM_PREFIX], target_line)
         
         # Move cursor to the new line
-        self.nvim.current.window.cursor = (target_line + 1, 5)
+        self.nvim.current.window.cursor = (target_line + 1, len(LLM_PREFIX))
         
         self.completion_active = True
         
         # Start the completion in a separate thread
         self.completion_thread = threading.Thread(
             target=self._stream_completion,
-            args=(history, model, target_buffer, target_line + 1)
+            args=(history, model, buffer_number, target_line + 1)
         )
         self.completion_thread.daemon = True
         self.completion_thread.start()
 
-    def _stream_completion(self, history, model, target_buffer, target_line):
+    def _stream_completion(self, history, model, buffer_number, target_line):
         try:
             response = litellm.completion(
                 model=model,
@@ -89,22 +84,31 @@ class LLMPlugin:
                     total_response += delta
                     
                     # Update the buffer using async_call to ensure thread safety
-                    self.nvim.async_call(self._update_buffer, target_buffer, target_line, total_response)
+                    self.nvim.async_call(self._update_buffer, buffer_number, target_line, total_response)
+                    
+                    # Check if completion was interrupted after scheduling update
+                    if not self.completion_active:
+                        completed_normally = False
+                        break
                     
         except Exception as e:
-            self.nvim.async_call(self.nvim.command, f'echom "LLM completion error: {str(e).replace('"', '\\"')}"')
+            error_msg = str(e).replace('"', r'\"')
+            self.nvim.async_call(self.nvim.command, f'echom "LLM completion error: {error_msg}"')
             completed_normally = False
         finally:
             self.completion_active = False
             # Add a new user prompt line only if completion finished normally
             if completed_normally:
-                self.nvim.async_call(self._finish_completion, target_buffer, target_line, total_response)
+                self.nvim.async_call(self._finish_completion, buffer_number, target_line, total_response)
 
-    def _update_buffer(self, target_buffer, start_line, total_response):
+    def _update_buffer(self, buffer_number, start_line, total_response):
         if not self.completion_active:
             return
             
         try:
+            # Get the buffer from the main thread
+            target_buffer = self.nvim.buffers[buffer_number]
+            
             # Check if user has modified the buffer (interruption detection)
             if self._check_for_user_interruption(target_buffer, start_line, total_response):
                 self.completion_active = False
@@ -112,7 +116,7 @@ class LLMPlugin:
                 
             # Split the total response into lines and prepend "LLM: " to the first line
             response_lines = total_response.split('\n')
-            lines_to_write = ["LLM: " + response_lines[0]]
+            lines_to_write = [LLM_PREFIX + response_lines[0]]
             if len(response_lines) > 1:
                 lines_to_write.extend(response_lines[1:])
                 
@@ -125,7 +129,8 @@ class LLMPlugin:
                     target_buffer.append(line)
                     
         except Exception as e:
-            self.nvim.command(f'echom "Buffer update error: {str(e).replace('"', '\\"')}"')
+            error_msg = str(e).replace('"', r'\"')
+            self.nvim.command(f'echom "Buffer update error: {error_msg}"')
             self.completion_active = False
 
     def _check_for_user_interruption(self, target_buffer, start_line, expected_response):
@@ -133,7 +138,7 @@ class LLMPlugin:
         try:
             # Build expected lines from the response
             response_lines = expected_response.split('\n')
-            expected_lines = ["LLM: " + response_lines[0]]
+            expected_lines = [LLM_PREFIX + response_lines[0]]
             if len(response_lines) > 1:
                 expected_lines.extend(response_lines[1:])
             
@@ -153,18 +158,22 @@ class LLMPlugin:
         except:
             return True
 
-    def _finish_completion(self, target_buffer, start_line, total_response):
+    def _finish_completion(self, buffer_number, start_line, total_response):
         """Add the user prompt line after completion"""
         try:
+            # Get the buffer from the main thread
+            target_buffer = self.nvim.buffers[buffer_number]
+            
             # Find the last line of the response
             response_lines = total_response.split('\n')
             last_line_num = start_line + len(response_lines) - 1
             
             # Add a new user prompt line
-            target_buffer.append("> ", last_line_num)
+            target_buffer.append([USER_PREFIX], last_line_num)
             
         except Exception as e:
-            self.nvim.command(f'echom "Completion finish error: {str(e)}"')
+            error_msg = str(e).replace('"', r'\"')
+            self.nvim.command(f'echom "Completion finish error: {error_msg}"')
 
     def _get_chat_history(self):
         cursor_line, _ = self.nvim.current.window.cursor
@@ -179,8 +188,8 @@ class LLMPlugin:
         for line in lines:
             if line.startswith("//") or line.startswith("#"):
                 continue
-            if line.startswith("LLM:"):
-                history.append({"role": "assistant", "content": line[4:].strip()})
+            if line.startswith(LLM_PREFIX):
+                history.append({"role": "assistant", "content": line[len(LLM_PREFIX):].strip()})
             elif line.startswith(">"):
                 line = line.lstrip('>').strip()
                 history.append({"role": "user", "content": line})
