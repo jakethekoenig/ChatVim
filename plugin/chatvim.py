@@ -6,6 +6,7 @@ import threading
 # Constants
 LLM_PREFIX = "LLM: "
 USER_PREFIX = "> "
+THROTTLE_CHARS = 20
 
 def get_system_prompt(prompt="default"):
     prompt_dir = os.path.expanduser("~/.config/chatvim/prompts")
@@ -63,7 +64,8 @@ class LLMPlugin:
         self.completion_thread.start()
 
     def _stream_completion(self, history, model, buffer_handle, target_line):
-        thread = threading.current_thread()
+        """Stream LLM completion to the buffer in a background thread"""
+        response = None
         try:
             response = litellm.completion(
                 model=model,
@@ -85,8 +87,8 @@ class LLMPlugin:
                 if delta:
                     total_response += delta
                     
-                    # Throttle updates to avoid flooding the UI - only update every 20 characters
-                    if len(total_response) - last_update_len >= 20 or '\n' in delta:
+                    # Throttle updates to avoid flooding the UI
+                    if len(total_response) - last_update_len >= THROTTLE_CHARS or '\n' in delta:
                         last_update_len = len(total_response)
                         self.nvim.async_call(self._update_buffer, buffer_handle, target_line, total_response)
                     
@@ -104,14 +106,17 @@ class LLMPlugin:
             self.nvim.async_call(self.nvim.command, f'echom "LLM completion error: {error_msg}"')
             completed_normally = False
         finally:
+            # Close the response stream to free resources
+            if response:
+                try:
+                    getattr(response, "close", lambda: None)()
+                except:
+                    pass
+            
             # Check one more time in case interruption happened right before finally
             if not self.completion_active.is_set():
                 completed_normally = False
             self.completion_active.clear()
-            
-            # Join the thread with timeout to avoid leaks
-            if self.completion_thread and self.completion_thread != thread:
-                self.completion_thread.join(timeout=0.1)
             self.completion_thread = None
             
             # Add a new user prompt line only if completion finished normally
@@ -119,12 +124,18 @@ class LLMPlugin:
                 self.nvim.async_call(self._finish_completion, buffer_handle, target_line, total_response)
 
     def _update_buffer(self, buffer_handle, start_line, total_response):
+        """Update the buffer with new response content"""
         if not self.completion_active.is_set():
             return
             
         try:
+            # Check if buffer is still loaded
+            if not self.nvim.api.nvim_buf_is_loaded(buffer_handle):
+                self.completion_active.clear()
+                return
+                
             # Get the buffer from the buffer handle
-            target_buffer = self.nvim.api.nvim_get_buf_by_handle(buffer_handle)
+            target_buffer = self.nvim.from_handle(buffer_handle)
             
             # Check if user has modified the buffer or entered insert mode (interruption detection)
             if self._check_for_user_interruption(target_buffer, start_line, total_response, buffer_handle):
@@ -144,10 +155,10 @@ class LLMPlugin:
             # Update the buffer with new content
             for i, line in enumerate(lines_to_write):
                 line_num = start_line + i
-                if line_num < len(target_buffer):
-                    target_buffer[line_num] = line
-                else:
+                if line_num >= len(target_buffer):
                     target_buffer.append(line)
+                else:
+                    target_buffer[line_num] = line
                     
         except Exception as e:
             error_msg = str(e).replace('"', r'\"')
@@ -160,7 +171,7 @@ class LLMPlugin:
             # Check if user is in insert mode and in the target buffer
             current_buffer = self.nvim.current.buffer
             if current_buffer.handle == buffer_handle:
-                current_mode = self.nvim.call('mode')
+                current_mode = self.nvim.call('mode', 1)  # Non-blocking mode call
                 if current_mode.startswith('i') or current_mode.startswith('R'):
                     return True
             
@@ -192,8 +203,12 @@ class LLMPlugin:
     def _finish_completion(self, buffer_handle, start_line, total_response):
         """Add the user prompt line after completion"""
         try:
+            # Check if buffer is still loaded
+            if not self.nvim.api.nvim_buf_is_loaded(buffer_handle):
+                return
+                
             # Get the buffer from the buffer handle
-            target_buffer = self.nvim.api.nvim_get_buf_by_handle(buffer_handle)
+            target_buffer = self.nvim.from_handle(buffer_handle)
             
             # Find the last line of the response
             response_lines = total_response.split('\n')
@@ -202,9 +217,10 @@ class LLMPlugin:
             # Add a new user prompt line
             target_buffer.append([USER_PREFIX], last_line_num)
             
-            # Move cursor to the new user prompt line for easy typing
-            # Check if this buffer is currently active
-            if self.nvim.current.buffer.handle == buffer_handle:
+            # Only move cursor if user hasn't switched buffers since completion started
+            # and if the user wants cursor positioning (check for a setting)
+            move_cursor = self.nvim.vars.get('chatvim_move_cursor_after_completion', True)
+            if move_cursor and self.nvim.current.buffer.handle == buffer_handle:
                 self.nvim.current.window.cursor = (last_line_num + 2, len(USER_PREFIX))
             
         except Exception as e:
