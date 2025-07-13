@@ -51,8 +51,8 @@ class LLMPlugin:
         cursor_line, _ = self.nvim.current.window.cursor
         target_line = cursor_line  # 0-indexed
         
-        # Add the initial "LLM: " line
-        target_buffer.append("LLM: ", target_line)
+        # Add the initial "LLM: " line (append inserts after target_line)
+        target_buffer.append(["LLM: "], target_line)
         
         # Move cursor to the new line
         self.nvim.current.window.cursor = (target_line + 1, 5)
@@ -77,39 +77,30 @@ class LLMPlugin:
             )
 
             total_response = ""
-            current_line_content = "LLM: "
+            completed_normally = True
             
             for chunk in response:
                 if not self.completion_active:
+                    completed_normally = False
                     break
                     
                 delta = chunk.choices[0].delta.content
                 if delta:
                     total_response += delta
                     
-                    # Split response into lines
-                    lines = (current_line_content + delta).split('\n')
-                    
                     # Update the buffer using async_call to ensure thread safety
-                    self.nvim.async_call(self._update_buffer, target_buffer, target_line, lines, total_response)
-                    
-                    # Update our tracking of the current line
-                    if len(lines) > 1:
-                        current_line_content = lines[-1]
-                    else:
-                        current_line_content = lines[0]
-                    
-                    # Small delay to allow user interaction
-                    time.sleep(0.01)
+                    self.nvim.async_call(self._update_buffer, target_buffer, target_line, total_response)
                     
         except Exception as e:
-            self.nvim.async_call(self.nvim.command, f'echom "LLM completion error: {str(e)}"')
+            self.nvim.async_call(self.nvim.command, f'echom "LLM completion error: {str(e).replace('"', '\\"')}"')
+            completed_normally = False
         finally:
             self.completion_active = False
-            # Add a new user prompt line
-            self.nvim.async_call(self._finish_completion, target_buffer, target_line, total_response)
+            # Add a new user prompt line only if completion finished normally
+            if completed_normally:
+                self.nvim.async_call(self._finish_completion, target_buffer, target_line, total_response)
 
-    def _update_buffer(self, target_buffer, start_line, lines, total_response):
+    def _update_buffer(self, target_buffer, start_line, total_response):
         if not self.completion_active:
             return
             
@@ -119,8 +110,14 @@ class LLMPlugin:
                 self.completion_active = False
                 return
                 
+            # Split the total response into lines and prepend "LLM: " to the first line
+            response_lines = total_response.split('\n')
+            lines_to_write = ["LLM: " + response_lines[0]]
+            if len(response_lines) > 1:
+                lines_to_write.extend(response_lines[1:])
+                
             # Update the buffer with new content
-            for i, line in enumerate(lines):
+            for i, line in enumerate(lines_to_write):
                 line_num = start_line + i
                 if line_num < len(target_buffer):
                     target_buffer[line_num] = line
@@ -128,23 +125,30 @@ class LLMPlugin:
                     target_buffer.append(line)
                     
         except Exception as e:
-            self.nvim.command(f'echom "Buffer update error: {str(e)}"')
+            self.nvim.command(f'echom "Buffer update error: {str(e).replace('"', '\\"')}"')
             self.completion_active = False
 
     def _check_for_user_interruption(self, target_buffer, start_line, expected_response):
         """Check if user has modified the buffer, indicating interruption"""
         try:
-            # Check if the LLM response line has been modified unexpectedly
-            if start_line < len(target_buffer):
-                current_line = target_buffer[start_line]
-                if current_line.startswith("LLM: "):
-                    current_content = current_line[5:]
-                    # If the current content doesn't match what we expect, user interrupted
-                    if expected_response and not expected_response.startswith(current_content):
+            # Build expected lines from the response
+            response_lines = expected_response.split('\n')
+            expected_lines = ["LLM: " + response_lines[0]]
+            if len(response_lines) > 1:
+                expected_lines.extend(response_lines[1:])
+            
+            # Check if any of the expected lines have been modified
+            for i, expected_line in enumerate(expected_lines):
+                line_num = start_line + i
+                if line_num < len(target_buffer):
+                    current_line = target_buffer[line_num]
+                    # If the current line doesn't match what we expect, user interrupted
+                    if current_line != expected_line:
                         return True
                 else:
-                    # If the line doesn't start with "LLM: ", user modified it
+                    # If we're expecting more lines than exist, something's wrong
                     return True
+                    
             return False
         except:
             return True
