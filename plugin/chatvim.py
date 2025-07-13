@@ -1,6 +1,8 @@
 import os
 import litellm
 import pynvim
+import threading
+import time
 
 def line_diff(subseq, line):
     ans = ""
@@ -24,6 +26,8 @@ def get_system_prompt(prompt="default"):
 class LLMPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
+        self.completion_active = False
+        self.completion_thread = None
 
 
     @pynvim.function("LLMResponse")
@@ -39,45 +43,124 @@ class LLMPlugin:
             self.make_llm_request(history, model)
 
     def make_llm_request(self, history, model):
-        response = litellm.completion(
-            model=model,
-            messages=history,
-            max_tokens=4000,
-            stream=True
+        if self.completion_active:
+            return
+        
+        # Store the target buffer and position
+        target_buffer = self.nvim.current.buffer
+        cursor_line, _ = self.nvim.current.window.cursor
+        target_line = cursor_line  # 0-indexed
+        
+        # Add the initial "LLM: " line
+        target_buffer.append("LLM: ", target_line)
+        
+        # Move cursor to the new line
+        self.nvim.current.window.cursor = (target_line + 1, 5)
+        
+        self.completion_active = True
+        
+        # Start the completion in a separate thread
+        self.completion_thread = threading.Thread(
+            target=self._stream_completion,
+            args=(history, model, target_buffer, target_line + 1)
         )
+        self.completion_thread.daemon = True
+        self.completion_thread.start()
 
-        initial_paste_value = self.nvim.command_output('set paste?')
-        self.nvim.command('set paste')
-        self.nvim.feedkeys("oLLM: ")
-
-        total_response = ""
-        interrupted = False
+    def _stream_completion(self, history, model, target_buffer, target_line):
         try:
-            for chunk in response:
-                current_line = self.nvim.call('getline', '.')
-                prefix = ""
-                if current_line.startswith("LLM: "):
-                    prefix = "LLM: "
-                    current_line = current_line[5:]
-                if len(current_line) != 0 and current_line != total_response[-len(current_line):]:
-                    last_line_response = total_response.split("\n")[-1]
-                    diff = line_diff(last_line_response, current_line)
-                    self.nvim.feedkeys("\x03cc{}{}\n> {}\x03".format(prefix, last_line_response, diff))
+            response = litellm.completion(
+                model=model,
+                messages=history,
+                max_tokens=4000,
+                stream=True
+            )
 
-                    interrupted = True
+            total_response = ""
+            current_line_content = "LLM: "
+            
+            for chunk in response:
+                if not self.completion_active:
                     break
+                    
                 delta = chunk.choices[0].delta.content
                 if delta:
-                    self.nvim.feedkeys(delta)
                     total_response += delta
-        except KeyboardInterrupt:
-            self.nvim.command('echom "Keyboard Interrupt received"')
+                    
+                    # Split response into lines
+                    lines = (current_line_content + delta).split('\n')
+                    
+                    # Update the buffer using async_call to ensure thread safety
+                    self.nvim.async_call(self._update_buffer, target_buffer, target_line, lines, total_response)
+                    
+                    # Update our tracking of the current line
+                    if len(lines) > 1:
+                        current_line_content = lines[-1]
+                    else:
+                        current_line_content = lines[0]
+                    
+                    # Small delay to allow user interaction
+                    time.sleep(0.01)
+                    
+        except Exception as e:
+            self.nvim.async_call(self.nvim.command, f'echom "LLM completion error: {str(e)}"')
         finally:
-            if not interrupted:
-                self.nvim.feedkeys("\x03o> \x03")
-            self.nvim.command('set {}'.format(initial_paste_value))
-            if interrupted:
-                self.nvim.feedkeys("a")
+            self.completion_active = False
+            # Add a new user prompt line
+            self.nvim.async_call(self._finish_completion, target_buffer, target_line, total_response)
+
+    def _update_buffer(self, target_buffer, start_line, lines, total_response):
+        if not self.completion_active:
+            return
+            
+        try:
+            # Check if user has modified the buffer (interruption detection)
+            if self._check_for_user_interruption(target_buffer, start_line, total_response):
+                self.completion_active = False
+                return
+                
+            # Update the buffer with new content
+            for i, line in enumerate(lines):
+                line_num = start_line + i
+                if line_num < len(target_buffer):
+                    target_buffer[line_num] = line
+                else:
+                    target_buffer.append(line)
+                    
+        except Exception as e:
+            self.nvim.command(f'echom "Buffer update error: {str(e)}"')
+            self.completion_active = False
+
+    def _check_for_user_interruption(self, target_buffer, start_line, expected_response):
+        """Check if user has modified the buffer, indicating interruption"""
+        try:
+            # Check if the LLM response line has been modified unexpectedly
+            if start_line < len(target_buffer):
+                current_line = target_buffer[start_line]
+                if current_line.startswith("LLM: "):
+                    current_content = current_line[5:]
+                    # If the current content doesn't match what we expect, user interrupted
+                    if expected_response and not expected_response.startswith(current_content):
+                        return True
+                else:
+                    # If the line doesn't start with "LLM: ", user modified it
+                    return True
+            return False
+        except:
+            return True
+
+    def _finish_completion(self, target_buffer, start_line, total_response):
+        """Add the user prompt line after completion"""
+        try:
+            # Find the last line of the response
+            response_lines = total_response.split('\n')
+            last_line_num = start_line + len(response_lines) - 1
+            
+            # Add a new user prompt line
+            target_buffer.append("> ", last_line_num)
+            
+        except Exception as e:
+            self.nvim.command(f'echom "Completion finish error: {str(e)}"')
 
     def _get_chat_history(self):
         cursor_line, _ = self.nvim.current.window.cursor
