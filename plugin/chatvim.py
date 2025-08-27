@@ -49,7 +49,7 @@ class LLMPlugin:
             target_line = cursor_line - 1  # Convert to 0-based for buffer operations
             
             # Add the initial "LLM: " line (append inserts after target_line)
-            target_buffer.append([LLM_PREFIX.rstrip()], target_line)
+            target_buffer.append([LLM_PREFIX], target_line)
             
             # Move cursor to the new line (1-based coordinates)
             self.nvim.current.window.cursor = (cursor_line + 1, len(LLM_PREFIX))
