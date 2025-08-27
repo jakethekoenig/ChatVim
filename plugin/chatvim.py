@@ -41,32 +41,44 @@ class LLMPlugin:
             self.nvim.command('echom "LLM completion already in progress"')
             return
         
-        # Store the target buffer handle and position for thread safety
-        target_buffer = self.nvim.current.buffer
-        buffer_handle = target_buffer.handle
-        cursor_line, _ = self.nvim.current.window.cursor  # 1-based line number
-        target_line = cursor_line - 1  # Convert to 0-based for buffer operations
-        
-        # Add the initial "LLM: " line (append inserts after target_line)
-        target_buffer.append([LLM_PREFIX], target_line)
-        
-        # Move cursor to the new line (1-based coordinates)
-        self.nvim.current.window.cursor = (cursor_line + 1, len(LLM_PREFIX))
-        
-        self.completion_active.set()
-        
-        # Start the completion in a separate thread
-        self.completion_thread = threading.Thread(
-            target=self._stream_completion,
-            args=(history, model, buffer_handle, target_line + 1)
-        )
-        self.completion_thread.daemon = True
-        self.completion_thread.start()
+        try:
+            # Store the target buffer handle and position for thread safety
+            target_buffer = self.nvim.current.buffer
+            buffer_handle = target_buffer.handle
+            cursor_line, _ = self.nvim.current.window.cursor  # 1-based line number
+            target_line = cursor_line - 1  # Convert to 0-based for buffer operations
+            
+            # Add the initial "LLM: " line (append inserts after target_line)
+            target_buffer.append([LLM_PREFIX.rstrip()], target_line)
+            
+            # Move cursor to the new line (1-based coordinates)
+            self.nvim.current.window.cursor = (cursor_line + 1, len(LLM_PREFIX))
+            
+            self.completion_active.set()
+            
+            # Add some debug info
+            self.nvim.command(f'echom "Starting LLM completion with model: {model}"')
+            
+            # Start the completion in a separate thread
+            self.completion_thread = threading.Thread(
+                target=self._stream_completion,
+                args=(history, model, buffer_handle, target_line + 1)
+            )
+            self.completion_thread.daemon = True
+            self.completion_thread.start()
+            
+        except Exception as e:
+            error_msg = str(e).replace('"', r'\"')
+            self.nvim.command(f'echom "Error starting LLM request: {error_msg}"')
+            self.completion_active.clear()
 
     def _stream_completion(self, history, model, buffer_handle, target_line):
         """Stream LLM completion to the buffer in a background thread"""
         response = None
         try:
+            # Debug: Log that we're starting the completion
+            self.nvim.async_call(self.nvim.command, 'echom "Thread started, calling litellm..."')
+            
             response = litellm.completion(
                 model=model,
                 messages=history,
@@ -74,11 +86,16 @@ class LLMPlugin:
                 stream=True
             )
 
+            # Debug: Log that we got a response
+            self.nvim.async_call(self.nvim.command, 'echom "Got response from litellm, starting stream..."')
+
             total_response = ""
             completed_normally = True
             last_update_len = 0
+            chunk_count = 0
             
             for chunk in response:
+                chunk_count += 1
                 if not self.completion_active.is_set():
                     completed_normally = False
                     break
@@ -87,8 +104,14 @@ class LLMPlugin:
                 if delta:
                     total_response += delta
                     
-                    # Throttle updates to avoid flooding the UI
-                    if len(total_response) - last_update_len >= THROTTLE_CHARS or '\n' in delta:
+                    # Update more frequently initially to show progress
+                    should_update = (
+                        len(total_response) - last_update_len >= THROTTLE_CHARS or 
+                        '\n' in delta or 
+                        chunk_count <= 3  # Always update first few chunks
+                    )
+                    
+                    if should_update:
                         last_update_len = len(total_response)
                         self.nvim.async_call(self._update_buffer, buffer_handle, target_line, total_response)
                     
@@ -100,6 +123,9 @@ class LLMPlugin:
             # Final update to ensure all content is written
             if completed_normally and len(total_response) > last_update_len:
                 self.nvim.async_call(self._update_buffer, buffer_handle, target_line, total_response)
+            
+            # Debug: Log completion status
+            self.nvim.async_call(self.nvim.command, f'echom "Stream completed. Chunks: {chunk_count}, Response length: {len(total_response)}"')
                     
         except Exception as e:
             error_msg = str(e).replace('"', r'\"')
@@ -122,6 +148,9 @@ class LLMPlugin:
             # Add a new user prompt line only if completion finished normally
             if completed_normally:
                 self.nvim.async_call(self._finish_completion, buffer_handle, target_line, total_response)
+            else:
+                # If completion failed, at least add the user prompt
+                self.nvim.async_call(self._add_user_prompt_after_failure, buffer_handle, target_line)
 
     def _update_buffer(self, buffer_handle, start_line, total_response):
         """Update the buffer with new response content"""
@@ -142,13 +171,11 @@ class LLMPlugin:
                 self.completion_active.clear()
                 return
                 
-            # Split the total response into lines and prepend "LLM: " to the first line
+            # Split the total response into lines
             response_lines = total_response.split('\n')
-            # Only add LLM_PREFIX if the first line doesn't already have it
-            first_line = response_lines[0]
-            if not first_line.startswith(LLM_PREFIX):
-                first_line = LLM_PREFIX + first_line
-            lines_to_write = [first_line]
+            
+            # Build the lines to write - first line gets "LLM: " prefix
+            lines_to_write = [LLM_PREFIX + response_lines[0]]
             if len(response_lines) > 1:
                 lines_to_write.extend(response_lines[1:])
                 
@@ -226,6 +253,23 @@ class LLMPlugin:
         except Exception as e:
             error_msg = str(e).replace('"', r'\"')
             self.nvim.command(f'echom "Completion finish error: {error_msg}"')
+
+    def _add_user_prompt_after_failure(self, buffer_handle, start_line):
+        """Add user prompt line after a failed completion"""
+        try:
+            # Check if buffer is still loaded
+            if not self.nvim.api.nvim_buf_is_loaded(buffer_handle):
+                return
+                
+            # Get the buffer from the buffer handle
+            target_buffer = self.nvim.from_handle(buffer_handle)
+            
+            # Add a new user prompt line after the LLM line
+            target_buffer.append([USER_PREFIX], start_line)
+            
+        except Exception as e:
+            error_msg = str(e).replace('"', r'\"')
+            self.nvim.command(f'echom "Error adding user prompt: {error_msg}"')
 
     def _get_chat_history(self):
         cursor_line, _ = self.nvim.current.window.cursor
