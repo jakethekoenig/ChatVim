@@ -163,7 +163,7 @@ class LLMPlugin:
                 return
                 
             # Get the buffer from the buffer handle
-            target_buffer = pynvim.Buffer(self.nvim, buffer_handle)
+            target_buffer = pynvim.api.Buffer(self.nvim, buffer_handle)
             
             # Split the total response into lines
             response_lines = total_response.split('\n')
@@ -235,7 +235,7 @@ class LLMPlugin:
                 return
                 
             # Get the buffer from the buffer handle
-            target_buffer = pynvim.Buffer(self.nvim, buffer_handle)
+            target_buffer = pynvim.api.Buffer(self.nvim, buffer_handle)
             
             # Find the last line of the response
             response_lines = total_response.split('\n')
@@ -262,7 +262,7 @@ class LLMPlugin:
                 return
                 
             # Get the buffer from the buffer handle
-            target_buffer = pynvim.Buffer(self.nvim, buffer_handle)
+            target_buffer = pynvim.api.Buffer(self.nvim, buffer_handle)
             
             # Add a new user prompt line after the LLM line
             target_buffer.append([USER_PREFIX], start_line)
