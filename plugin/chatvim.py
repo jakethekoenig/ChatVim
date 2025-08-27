@@ -154,8 +154,7 @@ class LLMPlugin:
 
     def _update_buffer(self, buffer_handle, start_line, total_response):
         """Update the buffer with new response content"""
-        if not self.completion_active.is_set():
-            return
+        # Don't check completion_active here to allow final updates to complete
             
         try:
             # Check if buffer is still loaded
@@ -167,7 +166,7 @@ class LLMPlugin:
             target_buffer = self.nvim.from_handle(buffer_handle)
             
             # Check if user has modified the buffer or entered insert mode (interruption detection)
-            if self._check_for_user_interruption(target_buffer, start_line, total_response, buffer_handle):
+            if self.completion_active.is_set() and self._check_for_user_interruption(target_buffer, start_line, total_response, buffer_handle):
                 self.completion_active.clear()
                 return
                 
