@@ -159,7 +159,7 @@ class LLMPlugin:
             
         try:
             # Check if buffer is still loaded
-            if not self.nvim.api.nvim_buf_is_loaded(buffer_handle):
+            if not self.nvim.api.buf_is_loaded(buffer_handle):
                 self.completion_active.clear()
                 return
                 
@@ -183,7 +183,7 @@ class LLMPlugin:
             for i, line in enumerate(lines_to_write):
                 line_num = start_line + i
                 if line_num >= len(target_buffer):
-                    target_buffer.append(line)
+                    target_buffer.append([line])
                 else:
                     target_buffer[line_num] = line
                     
@@ -231,7 +231,7 @@ class LLMPlugin:
         """Add the user prompt line after completion"""
         try:
             # Check if buffer is still loaded
-            if not self.nvim.api.nvim_buf_is_loaded(buffer_handle):
+            if not self.nvim.api.buf_is_loaded(buffer_handle):
                 return
                 
             # Get the buffer from the buffer handle
@@ -258,7 +258,7 @@ class LLMPlugin:
         """Add user prompt line after a failed completion"""
         try:
             # Check if buffer is still loaded
-            if not self.nvim.api.nvim_buf_is_loaded(buffer_handle):
+            if not self.nvim.api.buf_is_loaded(buffer_handle):
                 return
                 
             # Get the buffer from the buffer handle
