@@ -49,7 +49,7 @@ class LLMPlugin:
             target_line = cursor_line - 1  # Convert to 0-based for buffer operations
             
             # Add the initial "LLM: " line (append inserts after target_line)
-            target_buffer.append([LLM_PREFIX.rstrip()], target_line)
+            target_buffer.append([LLM_PREFIX.rstrip()], index=target_line)
             
             # Move cursor to the new line (1-based coordinates)
             self.nvim.current.window.cursor = (cursor_line + 1, len(LLM_PREFIX))
@@ -241,7 +241,7 @@ class LLMPlugin:
             last_line_num = start_line + len(response_lines) - 1
             
             # Add a new user prompt line
-            target_buffer.append([USER_PREFIX], last_line_num)
+            target_buffer.append([USER_PREFIX], index=last_line_num)
             
             # Only move cursor if user hasn't switched buffers since completion started
             # and if the user wants cursor positioning (check for a setting)
@@ -264,7 +264,7 @@ class LLMPlugin:
             target_buffer = self.nvim.from_handle(buffer_handle)
             
             # Add a new user prompt line after the LLM line
-            target_buffer.append([USER_PREFIX], start_line)
+            target_buffer.append([USER_PREFIX], index=start_line)
             
         except Exception as e:
             error_msg = str(e).replace('"', r'\"')
