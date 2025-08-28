@@ -201,7 +201,7 @@ class LLMPlugin:
         # Create buffer-local autocmds that notify us when user starts editing
         self.nvim.command(f"augroup ChatVimLLM_{bufnr}")
         self.nvim.command("autocmd!")
-        " Guard against self-induced changes: only interrupt if not writing
+        # Guard against self-induced changes: only interrupt if not writing
         self.nvim.command("autocmd InsertEnter <buffer> if !get(b:, 'chatvim_llm_writing', 0) | call LLMInterrupt(expand('<abuf>')) | endif")
         self.nvim.command("autocmd TextChanged,TextChangedI <buffer> if !get(b:, 'chatvim_llm_writing', 0) | call LLMInterrupt(expand('<abuf>')) | endif")
         self.nvim.command("augroup END")
