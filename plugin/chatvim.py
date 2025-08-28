@@ -112,14 +112,23 @@ class LLMPlugin:
                 start = req["start_line"]
                 prefix = req["prefix"]
                 text = prefix + total_response
-                # Split into lines (without trailing newline chars)
                 lines = text.split("\n")
-                # Replace only the previously written region to avoid OOB
                 start0 = start - 1  # 0-based
                 prev_len = req.get("last_len", 1)
                 end0 = start0 + prev_len
-                buf.api.set_lines(start0, end0, False, lines)
-                req["last_len"] = len(lines)
+                # Mark as plugin-induced change to avoid self-cancel
+                try:
+                    buf.vars["chatvim_llm_writing"] = 1
+                except Exception:
+                    pass
+                try:
+                    buf.api.set_lines(start0, end0, False, lines)
+                    req["last_len"] = len(lines)
+                finally:
+                    try:
+                        del buf.vars["chatvim_llm_writing"]
+                    except Exception:
+                        buf.vars["chatvim_llm_writing"] = 0
             except Exception:
                 pass
 
@@ -192,9 +201,9 @@ class LLMPlugin:
         # Create buffer-local autocmds that notify us when user starts editing
         self.nvim.command(f"augroup ChatVimLLM_{bufnr}")
         self.nvim.command("autocmd!")
-        # Define buffer-local autocmds; use <buffer> and pass the actual bufnr via <abuf>
-        self.nvim.command("autocmd InsertEnter <buffer> call LLMInterrupt(expand('<abuf>'))")
-        self.nvim.command("autocmd TextChanged,TextChangedI <buffer> call LLMInterrupt(expand('<abuf>'))")
+        " Guard against self-induced changes: only interrupt if not writing
+        self.nvim.command("autocmd InsertEnter <buffer> if !get(b:, 'chatvim_llm_writing', 0) | call LLMInterrupt(expand('<abuf>')) | endif")
+        self.nvim.command("autocmd TextChanged,TextChangedI <buffer> if !get(b:, 'chatvim_llm_writing', 0) | call LLMInterrupt(expand('<abuf>')) | endif")
         self.nvim.command("augroup END")
 
     def _cleanup_request(self, bufnr: int):
@@ -221,11 +230,47 @@ class LLMPlugin:
                 return
             try:
                 if not interrupted:
-                    start = req["start_line"]
-                    # Determine ending line index (0-based) after writing total_response
-                    end0 = (start - 1) + req.get("last_len", 1)
-                    # Insert a new prompt line immediately after the streamed block
-                    buf.append("> ", end0 - 1)
+                    # Defensive final write to ensure last_len is up-to-date
+                    def _final_write():
+                        r = self.active_requests.get(bufnr)
+                        if not r or r.get("id") is not req_id:
+                            return
+                        b = r.get("buf")
+                        if not b:
+                            return
+                        start = r["start_line"]
+                        prefix = r["prefix"]
+                        text = prefix + total_response
+                        lines = text.split("\n")
+                        start0 = start - 1
+                        prev_len = r.get("last_len", 1)
+                        end0 = start0 + prev_len
+                        try:
+                            b.vars["chatvim_llm_writing"] = 1
+                        except Exception:
+                            pass
+                        try:
+                            b.api.set_lines(start0, end0, False, lines)
+                            r["last_len"] = len(lines)
+                        finally:
+                            try:
+                                del b.vars["chatvim_llm_writing"]
+                            except Exception:
+                                b.vars["chatvim_llm_writing"] = 0
+                        # Append prompt immediately after updated region
+                        end0_after = start0 + r.get("last_len", 1)
+                        try:
+                            b.vars["chatvim_llm_writing"] = 1
+                        except Exception:
+                            pass
+                        try:
+                            b.append("> ", end0_after - 1)
+                        finally:
+                            try:
+                                del b.vars["chatvim_llm_writing"]
+                            except Exception:
+                                b.vars["chatvim_llm_writing"] = 0
+                    _final_write()
             finally:
                 # Guard: only clean up if we're still the active request
                 if self.active_requests.get(bufnr) is req:
