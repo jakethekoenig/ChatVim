@@ -1,16 +1,8 @@
 import os
+import threading
 import litellm
 import pynvim
 
-def line_diff(subseq, line):
-    ans = ""
-    at = 0
-    for c in line:
-        if len(subseq) > at and c == subseq[at]:
-            at += 1
-        else:
-            ans += c
-    return ans
 
 def get_system_prompt(prompt="default"):
     prompt_dir = os.path.expanduser("~/.config/chatvim/prompts")
@@ -24,6 +16,9 @@ def get_system_prompt(prompt="default"):
 class LLMPlugin:
     def __init__(self, nvim):
         self.nvim = nvim
+        # Track active streaming requests by buffer number
+        # { bufnr: {"cancel": False, "start_line": int, "prefix": "LLM: ", "last_len": int} }
+        self.active_requests = {}
 
 
     @pynvim.function("LLMResponse")
@@ -35,49 +30,137 @@ class LLMPlugin:
 
         model = self.nvim.vars.get("llm_model", "claude-3-5-sonnet-20240620")
 
-        if len(history) > 0:
-            self.make_llm_request(history, model)
+        if len(history) == 0:
+            return
 
-    def make_llm_request(self, history, model):
-        response = litellm.completion(
-            model=model,
-            messages=history,
-            max_tokens=4000,
-            stream=True
-        )
+        # Prepare target buffer and insertion point
+        buf = self.nvim.current.buffer
+        bufnr = buf.number
+        cursor_line, _ = self.nvim.current.window.cursor
+        insert_at = cursor_line  # We will insert after the cursor line
+        prefix = "LLM: "
 
-        initial_paste_value = self.nvim.command_output('set paste?')
-        self.nvim.command('set paste')
-        self.nvim.feedkeys("oLLM: ")
+        # Compute insertion index: window.cursor is 1-based; Buffer.append inserts after 0-based index
+        insert_at = cursor_line - 1  # insert after cursor line
+
+        # Insert the initial output line synchronously to avoid race conditions
+        try:
+            buf.append(prefix, insert_at)
+            append_ok = True
+        except Exception as e:
+            # Inform user and abort starting the stream (avoid quoting issues)
+            self.nvim.call('echom', f"ChatVim: failed to insert LLM line: {e}")
+            return
+
+        # Setup autocmds to interrupt on edits/insert in this buffer
+        self._setup_interrupt_autocmds(bufnr)
+
+        # If a previous request exists for this buffer, cancel and clean it up
+        prev = self.active_requests.get(bufnr)
+        if prev:
+            prev["cancel"] = True
+            # Let finalize/cleanup handle augroup removal
+
+        # Register active request
+        # Keep a direct buffer handle and track last_len (lines written). Start with 1 for the initial "LLM: " line.
+        req_obj = object()  # unique identity token for this request
+        self.active_requests[bufnr] = {
+            "cancel": False,
+            "start_line": insert_at + 2,  # inserted line is at cursor_line + 1; store 1-based line number
+            "prefix": prefix,
+            "last_len": 1,
+            "buf": buf,
+            "id": req_obj,
+        }
+
+        # Start streaming in background
+        threading.Thread(target=self.make_llm_request, args=(history, model, bufnr, req_obj), daemon=True).start()
+
+    def make_llm_request(self, history, model, bufnr, req_id):
+        """
+        Stream LLM output into a fixed buffer/region without taking insert mode,
+        allowing the user to switch buffers. Interrupts if user edits or enters insert in that buffer.
+        """
+        try:
+            response = litellm.completion(
+                model=model,
+                messages=history,
+                max_tokens=4000,
+                stream=True
+            )
+        except Exception as e:
+            # Surface error to user and cleanup on main thread (avoid quoting issues)
+            def _notify_and_cleanup():
+                self.nvim.call('echom', f"ChatVim error: {e}")
+                self._cleanup_request(bufnr)
+            self.nvim.async_call(_notify_and_cleanup)
+            return
 
         total_response = ""
         interrupted = False
+
+        def _write_output():
+            # Write the accumulated response into the target buffer region
+            req = self.active_requests.get(bufnr)
+            # Only write if this exact request is still current
+            if not req or req.get("id") is not req_id or req.get("cancel"):
+                return
+            try:
+                buf = req.get("buf")
+                if buf is None:
+                    return
+                start = req["start_line"]
+                prefix = req["prefix"]
+                text = prefix + total_response
+                lines = text.split("\n")
+                start0 = start - 1  # 0-based
+                prev_len = req.get("last_len", 1)
+                end0 = start0 + prev_len
+                # Mark as plugin-induced change to avoid self-cancel
+                try:
+                    buf.vars["chatvim_llm_writing"] = 1
+                except Exception:
+                    pass
+                try:
+                    buf.api.set_lines(start0, end0, False, lines)
+                    req["last_len"] = len(lines)
+                finally:
+                    try:
+                        del buf.vars["chatvim_llm_writing"]
+                    except Exception:
+                        buf.vars["chatvim_llm_writing"] = 0
+            except Exception:
+                pass
+
         try:
             for chunk in response:
-                current_line = self.nvim.call('getline', '.')
-                prefix = ""
-                if current_line.startswith("LLM: "):
-                    prefix = "LLM: "
-                    current_line = current_line[5:]
-                if len(current_line) != 0 and current_line != total_response[-len(current_line):]:
-                    last_line_response = total_response.split("\n")[-1]
-                    diff = line_diff(last_line_response, current_line)
-                    self.nvim.feedkeys("\x03cc{}{}\n> {}\x03".format(prefix, last_line_response, diff))
-
+                # Check for cancellation
+                req = self.active_requests.get(bufnr)
+                # Stop if cancelled or if a newer request replaced us
+                if (not req) or req.get("cancel") or (req.get("id") is not req_id):
                     interrupted = True
                     break
-                delta = chunk.choices[0].delta.content
+                # Extract delta content depending on provider schema
+                delta = None
+                ch = chunk
+                # Anthropic/OpenAI via litellm: prefer 'choices[0].delta.content' if available, else chunk.choices[0].text, else chunk.delta
+                try:
+                    delta = ch.choices[0].delta.content
+                except Exception:
+                    try:
+                        delta = ch.choices[0].text
+                    except Exception:
+                        try:
+                            delta = ch.delta
+                        except Exception:
+                            delta = None
                 if delta:
-                    self.nvim.feedkeys(delta)
                     total_response += delta
+                    self.nvim.async_call(_write_output)
         except KeyboardInterrupt:
-            self.nvim.command('echom "Keyboard Interrupt received"')
+            interrupted = True
         finally:
-            if not interrupted:
-                self.nvim.feedkeys("\x03o> \x03")
-            self.nvim.command('set {}'.format(initial_paste_value))
-            if interrupted:
-                self.nvim.feedkeys("a")
+            self._finalize_stream(bufnr, req_id, interrupted, total_response)
 
     def _get_chat_history(self):
         cursor_line, _ = self.nvim.current.window.cursor
@@ -100,3 +183,96 @@ class LLMPlugin:
                 if len(history) > 0:
                     history[-1]["content"] += "\n" + line.strip()
         return history
+
+    @pynvim.function("LLMInterrupt")
+    def llm_interrupt(self, args):
+        """
+        Interrupt an active request for the given buffer number.
+        """
+        try:
+            bufnr = int(args[0]) if args else self.nvim.current.buffer.number
+        except Exception:
+            bufnr = self.nvim.current.buffer.number
+        req = self.active_requests.get(bufnr)
+        if req:
+            req["cancel"] = True
+
+    def _setup_interrupt_autocmds(self, bufnr: int):
+        # Create buffer-local autocmds that notify us when user starts editing
+        self.nvim.command(f"augroup ChatVimLLM_{bufnr}")
+        self.nvim.command("autocmd!")
+        # Guard against self-induced changes: only interrupt if not writing
+        self.nvim.command("autocmd InsertEnter <buffer> if !get(b:, 'chatvim_llm_writing', 0) | call LLMInterrupt(expand('<abuf>')) | endif")
+        self.nvim.command("autocmd TextChanged,TextChangedI <buffer> if !get(b:, 'chatvim_llm_writing', 0) | call LLMInterrupt(expand('<abuf>')) | endif")
+        self.nvim.command("augroup END")
+
+    def _cleanup_request(self, bufnr: int):
+        # Clear autocmds and active request entry
+        try:
+            self.nvim.command(f"augroup ChatVimLLM_{bufnr} | autocmd! | augroup END")
+        except Exception:
+            pass
+        if bufnr in self.active_requests:
+            del self.active_requests[bufnr]
+
+    def _finalize_stream(self, bufnr: int, req_id, interrupted: bool, total_response: str):
+        # On completion, optionally add a new user prompt line, then cleanup
+        def _finish():
+            # Capture the specific request object we intend to finalize
+            req = self.active_requests.get(bufnr)
+            if not req or req.get("id") is not req_id:
+                return
+            buf = req.get("buf")
+            if buf is None:
+                # Only clean up if this exact req is still current
+                if self.active_requests.get(bufnr) is req:
+                    self._cleanup_request(bufnr)
+                return
+            try:
+                if not interrupted:
+                    # Defensive final write to ensure last_len is up-to-date
+                    def _final_write():
+                        r = self.active_requests.get(bufnr)
+                        if not r or r.get("id") is not req_id:
+                            return
+                        b = r.get("buf")
+                        if not b:
+                            return
+                        start = r["start_line"]
+                        prefix = r["prefix"]
+                        text = prefix + total_response
+                        lines = text.split("\n")
+                        start0 = start - 1
+                        prev_len = r.get("last_len", 1)
+                        end0 = start0 + prev_len
+                        try:
+                            b.vars["chatvim_llm_writing"] = 1
+                        except Exception:
+                            pass
+                        try:
+                            b.api.set_lines(start0, end0, False, lines)
+                            r["last_len"] = len(lines)
+                        finally:
+                            try:
+                                del b.vars["chatvim_llm_writing"]
+                            except Exception:
+                                b.vars["chatvim_llm_writing"] = 0
+                        # Append prompt immediately after updated region
+                        end0_after = start0 + r.get("last_len", 1)
+                        try:
+                            b.vars["chatvim_llm_writing"] = 1
+                        except Exception:
+                            pass
+                        try:
+                            b.append("> ", end0_after - 1)
+                        finally:
+                            try:
+                                del b.vars["chatvim_llm_writing"]
+                            except Exception:
+                                b.vars["chatvim_llm_writing"] = 0
+                    _final_write()
+            finally:
+                # Guard: only clean up if we're still the active request
+                if self.active_requests.get(bufnr) is req:
+                    self._cleanup_request(bufnr)
+        self.nvim.async_call(_finish)
