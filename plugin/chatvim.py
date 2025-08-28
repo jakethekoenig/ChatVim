@@ -49,20 +49,27 @@ class LLMPlugin:
         insert_at = cursor_line  # We will insert after the cursor line
         prefix = "LLM: "
 
-        # Insert the initial output line without changing modes/windows
-        def _init_line():
-            try:
-                buf.append(prefix, insert_at)
-            except Exception:
-                pass
+        # Compute insertion index: window.cursor is 1-based; Buffer.append inserts after 0-based index
+        insert_at = cursor_line - 1  # insert after cursor line
 
-        self.nvim.async_call(_init_line)
+        # Insert the initial output line synchronously to avoid race conditions
+        try:
+            buf.append(prefix, insert_at)
+        except Exception:
+            pass
 
         # Setup autocmds to interrupt on edits/insert in this buffer
         self._setup_interrupt_autocmds(bufnr)
 
         # Register active request
-        self.active_requests[bufnr] = {"cancel": False, "start_line": insert_at + 1, "prefix": prefix}
+        # Keep a direct buffer handle and track last_len (lines written). Start with 1 for the initial "LLM: " line.
+        self.active_requests[bufnr] = {
+            "cancel": False,
+            "start_line": insert_at + 1,  # 1-based line number of the "LLM: " line
+            "prefix": prefix,
+            "last_len": 1,
+            "buf": buf,
+        }
 
         # Start streaming in background
         threading.Thread(target=self.make_llm_request, args=(history, model, bufnr), daemon=True).start()
@@ -96,11 +103,7 @@ class LLMPlugin:
             if not req:
                 return
             try:
-                buf = None
-                for b in self.nvim.buffers:
-                    if b.number == bufnr:
-                        buf = b
-                        break
+                buf = req.get("buf")
                 if buf is None:
                     return
                 start = req["start_line"]
@@ -108,14 +111,12 @@ class LLMPlugin:
                 text = prefix + total_response
                 # Split into lines (without trailing newline chars)
                 lines = text.split("\n")
-                # Replace the region [start-1 based?] Note: buffer lines are 0-indexed in API wrappers.
-                # buf.api.set_lines expects [start, end) 0-based.
-                # start_line we stored is 1-based index of line where we inserted initial prefix line.
-                start0 = start - 1
-                end0 = start0 + len(lines)
-                # Ensure buffer has enough lines
-                # Replace existing region
+                # Replace only the previously written region to avoid OOB
+                start0 = start - 1  # 0-based
+                prev_len = req.get("last_len", 1)
+                end0 = start0 + prev_len
                 buf.api.set_lines(start0, end0, False, lines)
+                req["last_len"] = len(lines)
             except Exception:
                 pass
 
@@ -187,9 +188,9 @@ class LLMPlugin:
         # Create buffer-local autocmds that notify us when user starts editing
         self.nvim.command(f"augroup ChatVimLLM_{bufnr}")
         self.nvim.command("autocmd!")
-        # Using <buffer> requires current buffer; instead, target by bufnr with <buffer=nr>
-        self.nvim.command(f"autocmd InsertEnter <buffer={bufnr}> call LLMInterrupt({bufnr})")
-        self.nvim.command(f"autocmd TextChanged,TextChangedI <buffer={bufnr}> call LLMInterrupt({bufnr})")
+        # Define buffer-local autocmds; use <buffer> and pass the actual bufnr via <abuf>
+        self.nvim.command("autocmd InsertEnter <buffer> call LLMInterrupt(expand('<abuf>'))")
+        self.nvim.command("autocmd TextChanged,TextChangedI <buffer> call LLMInterrupt(expand('<abuf>'))")
         self.nvim.command("augroup END")
 
     def _cleanup_request(self, bufnr: int):
@@ -220,11 +221,9 @@ class LLMPlugin:
                 if not interrupted:
                     start = req["start_line"]
                     # Determine ending line index (0-based) after writing total_response
-                    text = req["prefix"] + total_response
-                    lines = text.split("\n")
-                    end0 = (start - 1) + len(lines)
-                    # Insert a new prompt line after
-                    buf.append("> ", end0)
+                    end0 = (start - 1) + req.get("last_len", 1)
+                    # Insert a new prompt line immediately after the streamed block
+                    buf.append("> ", end0 - 1)
             finally:
                 self._cleanup_request(bufnr)
         self.nvim.async_call(_finish)
