@@ -48,8 +48,8 @@ class LLMPlugin:
             buf.append(prefix, insert_at)
             append_ok = True
         except Exception as e:
-            # Inform user and abort starting the stream
-            self.nvim.command(f'echom "ChatVim: failed to insert LLM line: {str(e).replace(\'"\', "\'")}"')
+            # Inform user and abort starting the stream (avoid quoting issues)
+            self.nvim.call('echom', f"ChatVim: failed to insert LLM line: {e}")
             return
 
         # Setup autocmds to interrupt on edits/insert in this buffer
@@ -89,9 +89,9 @@ class LLMPlugin:
                 stream=True
             )
         except Exception as e:
-            # Surface error to user and cleanup on main thread
+            # Surface error to user and cleanup on main thread (avoid quoting issues)
             def _notify_and_cleanup():
-                self.nvim.command(f'echom "ChatVim error: {str(e).replace(\'"\', "\'")}"')
+                self.nvim.call('echom', f"ChatVim error: {e}")
                 self._cleanup_request(bufnr)
             self.nvim.async_call(_notify_and_cleanup)
             return
