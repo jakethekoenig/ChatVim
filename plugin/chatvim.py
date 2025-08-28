@@ -46,8 +46,12 @@ class LLMPlugin:
         # Insert the initial output line synchronously to avoid race conditions
         try:
             buf.append(prefix, insert_at)
-        except Exception:
-            pass
+            append_ok = True
+        except Exception as e:
+            append_ok = False
+            # Inform user and abort starting the stream
+            self.nvim.command(f'echom "ChatVim: failed to insert LLM line: {str(e).replace(\'"\', "\'")}"')
+            return
 
         # Setup autocmds to interrupt on edits/insert in this buffer
         self._setup_interrupt_autocmds(bufnr)
@@ -60,18 +64,20 @@ class LLMPlugin:
 
         # Register active request
         # Keep a direct buffer handle and track last_len (lines written). Start with 1 for the initial "LLM: " line.
+        req_obj = object()  # unique identity token for this request
         self.active_requests[bufnr] = {
             "cancel": False,
             "start_line": insert_at + 2,  # inserted line is at cursor_line + 1; store 1-based line number
             "prefix": prefix,
             "last_len": 1,
             "buf": buf,
+            "id": req_obj,
         }
 
         # Start streaming in background
-        threading.Thread(target=self.make_llm_request, args=(history, model, bufnr), daemon=True).start()
+        threading.Thread(target=self.make_llm_request, args=(history, model, bufnr, req_obj), daemon=True).start()
 
-    def make_llm_request(self, history, model, bufnr):
+    def make_llm_request(self, history, model, bufnr, req_id):
         """
         Stream LLM output into a fixed buffer/region without taking insert mode,
         allowing the user to switch buffers. Interrupts if user edits or enters insert in that buffer.
@@ -97,7 +103,8 @@ class LLMPlugin:
         def _write_output():
             # Write the accumulated response into the target buffer region
             req = self.active_requests.get(bufnr)
-            if not req:
+            # Only write if this exact request is still current
+            if not req or req.get("id") is not req_id or req.get("cancel"):
                 return
             try:
                 buf = req.get("buf")
@@ -121,7 +128,8 @@ class LLMPlugin:
             for chunk in response:
                 # Check for cancellation
                 req = self.active_requests.get(bufnr)
-                if not req or req.get("cancel"):
+                # Stop if cancelled or if a newer request replaced us
+                if (not req) or req.get("cancel") or (req.get("id") is not req_id):
                     interrupted = True
                     break
                 # Extract delta content depending on provider schema
@@ -204,15 +212,15 @@ class LLMPlugin:
         def _finish():
             # Capture the specific request object we intend to finalize
             req = self.active_requests.get(bufnr)
-            buf = req.get("buf") if req else None
+            if not req or req.get("id") is not req_id:
+                return
+            buf = req.get("buf")
             if buf is None:
                 # Only clean up if this exact req is still current
                 if self.active_requests.get(bufnr) is req:
                     self._cleanup_request(bufnr)
                 return
             try:
-                if not req:
-                    return
                 if not interrupted:
                     start = req["start_line"]
                     # Determine ending line index (0-based) after writing total_response
