@@ -48,7 +48,6 @@ class LLMPlugin:
             buf.append(prefix, insert_at)
             append_ok = True
         except Exception as e:
-            append_ok = False
             # Inform user and abort starting the stream
             self.nvim.command(f'echom "ChatVim: failed to insert LLM line: {str(e).replace(\'"\', "\'")}"')
             return
@@ -90,11 +89,11 @@ class LLMPlugin:
                 stream=True
             )
         except Exception as e:
-            # Surface error to user
-            def _echo_err():
+            # Surface error to user and cleanup on main thread
+            def _notify_and_cleanup():
                 self.nvim.command(f'echom "ChatVim error: {str(e).replace(\'"\', "\'")}"')
-            self.nvim.async_call(_echo_err)
-            self._cleanup_request(bufnr)
+                self._cleanup_request(bufnr)
+            self.nvim.async_call(_notify_and_cleanup)
             return
 
         total_response = ""
@@ -152,7 +151,7 @@ class LLMPlugin:
         except KeyboardInterrupt:
             interrupted = True
         finally:
-            self._finalize_stream(bufnr, interrupted, total_response)
+            self._finalize_stream(bufnr, req_id, interrupted, total_response)
 
     def _get_chat_history(self):
         cursor_line, _ = self.nvim.current.window.cursor
@@ -207,7 +206,7 @@ class LLMPlugin:
         if bufnr in self.active_requests:
             del self.active_requests[bufnr]
 
-    def _finalize_stream(self, bufnr: int, interrupted: bool, total_response: str):
+    def _finalize_stream(self, bufnr: int, req_id, interrupted: bool, total_response: str):
         # On completion, optionally add a new user prompt line, then cleanup
         def _finish():
             # Capture the specific request object we intend to finalize
