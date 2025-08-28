@@ -3,15 +3,6 @@ import threading
 import litellm
 import pynvim
 
-def line_diff(subseq, line):
-    ans = ""
-    at = 0
-    for c in line:
-        if len(subseq) > at and c == subseq[at]:
-            at += 1
-        else:
-            ans += c
-    return ans
 
 def get_system_prompt(prompt="default"):
     prompt_dir = os.path.expanduser("~/.config/chatvim/prompts")
@@ -61,11 +52,17 @@ class LLMPlugin:
         # Setup autocmds to interrupt on edits/insert in this buffer
         self._setup_interrupt_autocmds(bufnr)
 
+        # If a previous request exists for this buffer, cancel and clean it up
+        prev = self.active_requests.get(bufnr)
+        if prev:
+            prev["cancel"] = True
+            # Let finalize/cleanup handle augroup removal
+
         # Register active request
         # Keep a direct buffer handle and track last_len (lines written). Start with 1 for the initial "LLM: " line.
         self.active_requests[bufnr] = {
             "cancel": False,
-            "start_line": insert_at + 1,  # 1-based line number of the "LLM: " line
+            "start_line": insert_at + 2,  # inserted line is at cursor_line + 1; store 1-based line number
             "prefix": prefix,
             "last_len": 1,
             "buf": buf,
@@ -205,15 +202,13 @@ class LLMPlugin:
     def _finalize_stream(self, bufnr: int, interrupted: bool, total_response: str):
         # On completion, optionally add a new user prompt line, then cleanup
         def _finish():
-            # If not interrupted, append a new line '> ' after the streamed block
+            # Capture the specific request object we intend to finalize
             req = self.active_requests.get(bufnr)
-            buf = None
-            for b in self.nvim.buffers:
-                if b.number == bufnr:
-                    buf = b
-                    break
+            buf = req.get("buf") if req else None
             if buf is None:
-                self._cleanup_request(bufnr)
+                # Only clean up if this exact req is still current
+                if self.active_requests.get(bufnr) is req:
+                    self._cleanup_request(bufnr)
                 return
             try:
                 if not req:
@@ -225,5 +220,7 @@ class LLMPlugin:
                     # Insert a new prompt line immediately after the streamed block
                     buf.append("> ", end0 - 1)
             finally:
-                self._cleanup_request(bufnr)
+                # Guard: only clean up if we're still the active request
+                if self.active_requests.get(bufnr) is req:
+                    self._cleanup_request(bufnr)
         self.nvim.async_call(_finish)
