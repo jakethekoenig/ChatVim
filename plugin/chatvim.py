@@ -83,18 +83,17 @@ class LLMPlugin:
         cursor_line, _ = self.nvim.current.window.cursor
         lines = self.nvim.current.buffer[:cursor_line]
         for i, line in enumerate(lines[::-1]):
-            if line.startswith(">>"):
+            # Want to allow copying python interactive sessions
+            if line.startswith(">>") and not line.startswith(">>>"):
                 lines = lines[len(lines) - i - 1:]
                 break
 
         history = []
 
         for line in lines:
-            if line.startswith("//") or line.startswith("#"):
-                continue
             if line.startswith("LLM:"):
                 history.append({"role": "assistant", "content": line[4:].strip()})
-            elif line.startswith(">"):
+            elif line.startswith(">") and not line.startswith(">>>"):
                 line = line.lstrip('>').strip()
                 history.append({"role": "user", "content": line})
             else:
